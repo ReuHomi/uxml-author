@@ -200,5 +200,10 @@ section('H — no silent default panel size');
   expect(threw, 'run() refuses to render without a panel size');
 }
 
+// Close the window before leaving. happy-dom holds timers and async work that
+// otherwise survive into process teardown, and native cleanup with live handles
+// is how a clean run turns into an access violation on Windows.
+await w.happyDOM.close();
+
 console.log(failures ? `\nFAILED: ${failures}` : '\nall conditions hold');
 process.exit(failures ? 1 : 0);

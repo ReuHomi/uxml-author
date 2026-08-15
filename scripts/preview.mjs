@@ -184,4 +184,9 @@ const page = readFileSync(ROOT + 'src/page.html', 'utf8')
 writeFileSync(outPath, page);
 L(`\npreview → ${outPath}  (${(page.length / 1024).toFixed(0)} KB)`);
 
+// See tests/conditions.mjs: leaving happy-dom open across process teardown is
+// a native-crash hazard, and a crash here would replace the exit-code contract
+// with whatever the OS reports.
+await w.happyDOM.close();
+
 process.exit(problems.length ? 1 : 0);
