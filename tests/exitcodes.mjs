@@ -83,7 +83,9 @@ console.log('\nA — the page the human opens is the code we verified');
 {
   const { readFileSync } = await import('node:fs');
   execFileSync('node', [ROOT + 'scripts/preview.mjs', goodJob], { stdio: 'pipe' });
-  const html = readFileSync(ROOT + 'out/preview.html', 'utf8');
+  // Read what this run wrote, not whatever happens to be lying in out/ from a
+  // manual run. A fresh clone found this: the assertion passed on leftovers.
+  const html = readFileSync(TMP + 'out/preview.html', 'utf8');
   const blocks = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
   expect(blocks[0] === readFileSync(ROOT + 'src/core.bundle.js', 'utf8'), 'the renderer is inlined byte-for-byte');
   expect(blocks[1] === readFileSync(ROOT + 'src/check.js', 'utf8'), 'the check is inlined byte-for-byte');
