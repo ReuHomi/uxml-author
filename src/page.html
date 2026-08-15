@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>UXML preview</title>
+<style>
+  /* Two themes off the same five neutrals, inverted. Accents shift value with
+     the ground so contrast holds either way; hue stays put so the meaning of a
+     red badge does not change with the theme. */
+  :root, [data-theme="light"] {
+    color-scheme: light;
+    --paper:  #FAFAF8;
+    --card:   #FFFFFF;
+    --rule:   #DADADA;
+    --mute:   #B0B3B8;
+    --slate:  #43464B;
+    --ink:    #0F1012;
+    --red:    #C4342B;
+    --green:  #1F7A45;
+    --amber:  #A2740C;
+    --check:  #F2F2F0;
+    --check2: #FFFFFF;
+  }
+  [data-theme="dark"] {
+    color-scheme: dark;
+    --paper:  #0F1012;
+    --card:   #17181B;
+    --rule:   #2C2F34;
+    --mute:   #7C8189;
+    --slate:  #C3C7CD;
+    --ink:    #FAFAF8;
+    --red:    #E2695C;
+    --green:  #4FAE7C;
+    --amber:  #D3A431;
+    --check:  #1B1D20;
+    --check2: #17181B;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme]) {
+      color-scheme: dark;
+      --paper:  #0F1012; --card:   #17181B; --rule:   #2C2F34;
+      --mute:   #7C8189; --slate:  #C3C7CD; --ink:    #FAFAF8;
+      --red:    #E2695C; --green:  #4FAE7C; --amber:  #D3A431;
+      --check:  #1B1D20; --check2: #17181B;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 36px 56px; background: var(--paper); color: var(--ink);
+    font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+  h1 { font-size: 17px; margin: 0 0 3px; font-weight: 600; letter-spacing: -.015em; }
+  .sub { color: var(--mute); margin: 0 0 24px; font-size: 12.5px; }
+  .label {
+    font-size: 10.5px; font-weight: 600; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--mute); margin: 0 0 12px;
+  }
+  .card { background: var(--card); border: 1px solid var(--rule); border-radius: 3px; }
+
+  #verdict {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 13.5px; font-weight: 500; color: var(--slate);
+    padding: 13px 16px; margin-bottom: 24px;
+    background: var(--card); border: 1px solid var(--rule); border-radius: 3px;
+  }
+  #dot { width: 8px; height: 8px; border-radius: 50%; background: var(--mute); flex: none; }
+
+  .render { margin-bottom: 24px; }
+  .bar { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; }
+  .bar .label { margin: 0; flex: 1; }
+  button {
+    font: inherit; font-size: 11.5px; font-weight: 500; color: var(--slate);
+    background: var(--card); border: 1px solid var(--rule); border-radius: 3px;
+    padding: 4px 11px; cursor: pointer;
+  }
+  button:hover { border-color: var(--mute); }
+  button[aria-pressed="true"] { color: var(--card); background: var(--slate); border-color: var(--slate); }
+  #viewport {
+    position: relative; overflow: hidden;
+    border: 1px solid var(--rule); border-radius: 3px;
+    background: repeating-conic-gradient(var(--check2) 0% 25%, var(--check) 0% 50%) 0 0 / 18px 18px;
+  }
+  #stage { position: absolute; top: 0; left: 0; transform-origin: top left; }
+  #caption { font-size: 11px; color: var(--mute); text-align: right; margin-top: 7px;
+             font-variant-numeric: tabular-nums; }
+  .note { font-size: 12px; color: var(--mute); margin-top: 14px; max-width: 68ch; }
+
+  .report { padding: 20px 22px; }
+  .chan { padding: 15px 0; border-top: 1px solid var(--rule); }
+  .chan:first-of-type { border-top: 0; padding-top: 0; }
+  .chan:last-of-type { padding-bottom: 0; }
+  .chan-h { display: flex; align-items: center; gap: 9px; margin-bottom: 5px; }
+  .chan-h b { font-size: 13px; font-weight: 600; letter-spacing: -.005em; }
+  .n {
+    font-variant-numeric: tabular-nums; font-size: 10.5px; font-weight: 600;
+    min-width: 19px; text-align: center; border-radius: 3px; padding: 1px 6px;
+    color: var(--mute); background: var(--paper); border: 1px solid var(--rule);
+  }
+  .has.sev-read    .n { color: var(--card); background: var(--amber); border-color: var(--amber); }
+  .has.sev-problem .n { color: var(--card); background: var(--red);   border-color: var(--red); }
+  .has.sev-flat    .n { color: var(--slate); background: var(--paper); border-color: var(--mute); }
+  .chan p { margin: 0 0 9px; font-size: 12px; color: var(--mute); max-width: 82ch; }
+  ul { margin: 0; padding-left: 17px; }
+  li { margin: 3px 0; font-size: 12.5px; color: var(--slate); }
+  .empty { color: var(--mute); font-size: 12.5px; }
+
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  code { color: var(--ink); }
+  pre { margin: 0; white-space: pre-wrap; color: var(--slate); }
+  details { margin-top: 24px; border-top: 1px solid var(--rule); padding-top: 18px; }
+  summary { cursor: pointer; color: var(--mute); font-size: 12.5px; }
+  .src { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 16px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1 id="h1">UXML preview</h1>
+    <p class="sub">Everything needed to judge this is in this one file. It loads nothing from anywhere.</p>
+  </div>
+  <button id="theme" type="button" aria-pressed="false">Dark</button>
+</header>
+
+<div id="verdict"><span id="dot"></span><span id="verdict-text">Running&hellip;</span></div>
+
+<section class="render">
+  <div class="bar">
+    <p class="label">Render</p>
+    <button id="z-ui" type="button">Fit UI</button>
+    <button id="z-screen" type="button">Fit screen</button>
+    <button id="z-actual" type="button">100%</button>
+  </div>
+  <div id="viewport"><div id="stage"></div></div>
+  <div id="caption"></div>
+  <p class="note">
+    If something disappeared and nothing beside the screen says so, that is the failure
+    this tool exists to catch. Read the report against what you see.
+  </p>
+</section>
+
+<section class="card report">
+  <p class="label">Report</p>
+  <div id="report"></div>
+</section>
+
+<details>
+  <summary>Source (UXML / USS)</summary>
+  <div class="src">
+    <div><p class="label" style="margin-top:14px">UXML</p><pre id="src-uxml"></pre></div>
+    <div><p class="label" style="margin-top:14px">USS</p><pre id="src-uss"></pre></div>
+  </div>
+</details>
+
+<script>/*__CORE__*/</script>
+<script>/*__CHECK__*/</script>
+<script>var UXML_INPUT = "__INPUT__";</script>
+<script>
+(async function () {
+  var vtext = document.getElementById('verdict-text');
+  var dot = document.getElementById('dot');
+  var report = document.getElementById('report');
+
+  function esc(s) {
+    return String(s).replace(/[&<>]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c];
+    });
+  }
+
+  function say(text, colour) {
+    vtext.textContent = text;
+    dot.style.background = colour;
+  }
+
+  function channel(sev, title, blurb, items, render) {
+    var d = document.createElement('div');
+    d.className = 'chan sev-' + sev + (items.length ? ' has' : '');
+    var body = items.length
+      ? '<ul>' + items.map(render).map(function (t) { return '<li>' + t + '</li>'; }).join('') + '</ul>'
+      : '<div class="empty">None</div>';
+    d.innerHTML =
+      '<div class="chan-h"><b>' + title + '</b><span class="n">' + items.length + '</span></div>' +
+      '<p>' + blurb + '</p>' + body;
+    report.appendChild(d);
+  }
+
+  try {
+    if (typeof UXML_INPUT === 'string') {
+      throw new Error('this is the page template; open the preview.html that scripts/preview.mjs writes');
+    }
+    if (!globalThis.UxmlCore) throw new Error('the renderer bundle did not load');
+    var core = globalThis.UxmlCore;
+    await core.loadLayoutEngine();
+    if (!core.isLayoutEngineReady()) throw new Error('loadLayoutEngine() returned but the engine is not ready');
+
+    var panel = UXML_INPUT.panel;
+    var stage = document.getElementById('stage');
+    var viewport = document.getElementById('viewport');
+    stage.style.width = panel.width + 'px';
+    stage.style.height = panel.height + 'px';
+
+    var res = globalThis.UxmlCheck.run(core, stage, UXML_INPUT);
+
+    if (UXML_INPUT.title) document.getElementById('h1').textContent = UXML_INPUT.title;
+    document.getElementById('src-uxml').textContent = UXML_INPUT.uxml;
+    document.getElementById('src-uss').textContent = Object.keys(UXML_INPUT.sheets)
+      .map(function (k) { return '/* ' + k + ' */\n' + UXML_INPUT.sheets[k]; }).join('\n\n');
+
+    // dispose tears the painted DOM out with it, so it waits for the page to go
+    window.addEventListener('pagehide', function () { res.dispose(); });
+
+    /* zoom ─────────────────────────────────────────────────────────────
+       The panel is the screen; the UI is usually a small part of it, so
+       fitting the screen can leave the thing being judged at a few dozen
+       pixels. "Fit UI" frames the painted content instead, and it may
+       magnify — capping at 1x made it identical to 100% for every UI
+       smaller than the column, which is most of them. The transform is
+       visual only, Yoga never sees it, and the factor is always printed. */
+    var MAX_SCALE = 4;
+    var content = (function () {
+      var l = Infinity, t = Infinity, r = -Infinity, b = -Infinity, found = false;
+      res.boxes.forEach(function (n) {
+        if (n.id === res.rootId) return;
+        if (n.box.width === 0 || n.box.height === 0) return;
+        found = true;
+        l = Math.min(l, n.box.left); t = Math.min(t, n.box.top);
+        r = Math.max(r, n.box.left + n.box.width);
+        b = Math.max(b, n.box.top + n.box.height);
+      });
+      if (!found) return { left: 0, top: 0, width: panel.width, height: panel.height };
+      var pad = 12;
+      var L = Math.max(0, l - pad), T = Math.max(0, t - pad);
+      return { left: L, top: T,
+               width: Math.min(panel.width, r + pad) - L,
+               height: Math.min(panel.height, b + pad) - T };
+    })();
+
+    var MAX_H = Math.max(320, Math.round(window.innerHeight * 0.6));
+    var mode = 'ui';
+
+    function apply() {
+      var vw = viewport.clientWidth || (document.body.clientWidth - 72);
+      var box = mode === 'screen'
+        ? { left: 0, top: 0, width: panel.width, height: panel.height }
+        : content;
+      var k = mode === 'actual' ? 1 : Math.min(MAX_SCALE, vw / box.width, MAX_H / box.height);
+      viewport.style.height = Math.min(MAX_H, Math.round(box.height * k)) + 'px';
+      stage.style.transform =
+        'scale(' + k + ') translate(' + (-box.left) + 'px,' + (-box.top) + 'px)';
+      document.getElementById('caption').textContent =
+        (mode === 'screen'
+          ? 'screen ' + panel.width + ' \u00d7 ' + panel.height
+          : 'UI ' + Math.round(box.width) + ' \u00d7 ' + Math.round(box.height) +
+            ' in screen ' + panel.width + ' \u00d7 ' + panel.height) +
+        '   \u00b7   ' + (k === 1 ? 'actual size' : Math.round(k * 100) + '%');
+      [['ui', 'z-ui'], ['screen', 'z-screen'], ['actual', 'z-actual']].forEach(function (p) {
+        document.getElementById(p[1]).setAttribute('aria-pressed', String(mode === p[0]));
+      });
+    }
+    ['ui', 'screen', 'actual'].forEach(function (m) {
+      document.getElementById('z-' + m).addEventListener('click', function () { mode = m; apply(); });
+    });
+    window.addEventListener('resize', apply);
+    apply();
+
+    // The chrome can be dark or light independently of the UI being judged:
+    // someone designing a light HUD should not have to read it on black.
+    var themeBtn = document.getElementById('theme');
+    var dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    function paintTheme() {
+      document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+      themeBtn.textContent = dark ? 'Light' : 'Dark';
+      themeBtn.setAttribute('aria-pressed', String(dark));
+    }
+    themeBtn.addEventListener('click', function () { dark = !dark; paintTheme(); });
+    paintTheme();
+
+    /* report ───────────────────────────────────────────────────────── */
+    channel('read', 'Not drawn by this version',
+      'Falls back to a plain element, so it has zero size here. Unity draws it. Nothing on ' +
+      'screen marks the absence, which makes this list the only trace.',
+      res.unsupported, function (x) { return esc(x.message); });
+
+    channel('flat', 'Assets not yet present',
+      'Normal while a UI is new; drawn as a magenta hatch. Kept apart from real problems on ' +
+      'purpose \u2014 bury a normal state among failures and the whole report gets ignored, ' +
+      'which is the same as having no report.',
+      res.missingAssets, function (x) { return esc(x.message); });
+
+    channel('flat', 'Supplied for this preview only',
+      'Not in the project; Unity will not show these. The core falls silent the moment an asset ' +
+      'resolves, so this comes from our own record rather than from a warning.',
+      res.injected, function (p) { return '<code>' + esc(p) + '</code>'; });
+
+    channel('problem', 'Collapsed to zero size',
+      'A failure that raises no warning. Nodes already listed above are left out \u2014 the same ' +
+      'fact counted twice is still one fact.',
+      res.collapsed, function (c) { return '<code>&lt;' + esc(c.type) + '&gt; #' + esc(c.name) + '</code>'; });
+
+    channel('problem', 'Outside the panel',
+      'Measured against ' + panel.width + ' \u00d7 ' + panel.height + '.',
+      res.overflow, function (c) { return '<code>&lt;' + esc(c.type) + '&gt; #' + esc(c.name) + '</code>'; });
+
+    var misses = (UXML_INPUT.meta && UXML_INPUT.meta.sheetMisses) || [];
+    channel('problem', 'Stylesheets that could not be read',
+      'Unlike a missing asset, a missing sheet makes the coordinates wrong rather than merely ' +
+      'incomplete.',
+      misses, function (m) { return '<code>' + esc(m.key) + '</code>'; });
+
+    var skipped = (UXML_INPUT.meta && UXML_INPUT.meta.assetSkipped) || [];
+    channel('problem', 'Images left out of the embed',
+      'Dropping one quietly would read as a broken path.',
+      skipped, function (a) { return '<code>' + esc(a.path) + '</code> \u2014 ' + esc(a.why); });
+
+    channel('flat', 'Measured on Unity 6000.0.40f1',
+      'Raised whenever a control relies on theme defaults, so it is a standing condition rather ' +
+      'than an event. It stays out of the verdict.',
+      res.versionDependent, function (x) { return esc(x.message); });
+
+    channel('problem', 'Other warnings', 'Unsupported properties, selectors, units.',
+      res.other, function (x) { return '<code>' + esc(x.kind) + '</code> ' + esc(x.message); });
+
+    var footer = document.createElement('p');
+    footer.className = 'note';
+    footer.textContent =
+      'These coordinates come from real canvas text measurement, so they hold. The headless gate ' +
+      'estimates text per character \u2014 it uses coordinates to judge, never to report numbers.';
+    report.appendChild(footer);
+
+    /* verdict ──────────────────────────────────────────────────────── */
+    var painted = stage.childNodes.length > 0 &&
+                  res.painted.elementCount === res.painted.boxCount &&
+                  res.painted.childCount > 0;
+    var clean = res.collapsed.length === 0 && res.overflow.length === 0 &&
+                res.other.length === 0 && misses.length === 0 && skipped.length === 0;
+
+    if (!painted) {
+      say('Fail \u2014 the channels agree but nothing stayed on screen. (children ' +
+          stage.childNodes.length + ', painted ' + res.painted.elementCount +
+          ' of ' + res.painted.boxCount + ')', 'var(--red)');
+    } else if (!clean) {
+      say('Attention \u2014 it painted, but the report flags something below.', 'var(--amber)');
+    } else {
+      say('Pass \u2014 it painted, and the judgement channels are empty.', 'var(--green)');
+    }
+
+  } catch (e) {
+    say('Fail \u2014 ' + ((e && e.message) ? e.message : String(e)), 'var(--red)');
+    var pre = document.createElement('pre');
+    pre.textContent = (e && e.stack) ? e.stack : String(e);
+    report.appendChild(pre);
+  }
+})();
+</script>
+
+</body>
+</html>

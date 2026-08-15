@@ -1,0 +1,7 @@
+{
+  "uxml": "Inventory.uxml",
+  "title": "Inventory — 1920x1080",
+  "panel": { "width": 1920, "height": 1080 },
+  "assets": { "Art/potion.png": "Art/potion.png" },
+  "out": "../out/preview-1080.html"
+}

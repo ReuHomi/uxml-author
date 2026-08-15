@@ -1,0 +1,6 @@
+{
+  "uxml": "Inventory.uxml",
+  "panel": { "width": 480, "height": 320 },
+  "assets": { "Art/potion.png": "Art/potion.png" },
+  "out": "../out/preview.html"
+}

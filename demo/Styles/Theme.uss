@@ -1,0 +1,2 @@
+#Panel { width: 280px; padding: 14px; background-color: rgb(28,30,36);
+         border-width: 1px; border-color: rgb(88,94,108); }

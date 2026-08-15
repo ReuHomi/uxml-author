@@ -1,0 +1,8 @@
+@import url("Theme.uss");
+#Title { font-size: 20px; color: rgb(235,238,245); margin-bottom: 10px; }
+#Row { flex-direction: row; align-items: center; margin-bottom: 10px; }
+#Icon { width: 48px; height: 48px; margin-right: 10px;
+        background-image: url("Art/potion.png"); }
+#ItemName { color: rgb(200,205,215); }
+#UseButton { height: 32px; background-color: rgb(60,90,150);
+             color: rgb(240,242,248); }

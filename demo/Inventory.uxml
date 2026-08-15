@@ -1,0 +1,12 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <Style src="Styles/Main.uss" />
+  <ui:VisualElement name="Panel">
+    <ui:Label name="Title" text="Inventory" />
+    <ui:VisualElement name="Row">
+      <ui:Image name="Icon" />
+      <ui:Label name="ItemName" text="Health Potion" />
+    </ui:VisualElement>
+    <ui:Toggle name="AutoUse" label="Auto-use" />
+    <ui:Button name="UseButton" text="Use" />
+  </ui:VisualElement>
+</ui:UXML>

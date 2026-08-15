@@ -1,0 +1,2 @@
+{ "uxml": "Inventory.uxml", "title": "Inventory", "className": "InventoryController",
+  "outDir": "../out", "contract": "../out/ui-contract.md" }

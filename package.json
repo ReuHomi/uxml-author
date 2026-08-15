@@ -1,0 +1,14 @@
+{
+  "name": "uxml-author",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Claude Skill: design Unity UI Toolkit screens and preview the layout without Unity",
+  "license": "Apache-2.0",
+  "scripts": {
+    "test": "node tests/conditions.mjs && node tests/exitcodes.mjs && node tests/binding.mjs && node tests/docs.mjs",
+    "build:core": "node scripts/build-core-bundle.mjs"
+  },
+  "devDependencies": { "esbuild": "^0.25.0", "uxml-preview": "0.4.0" },
+  "dependencies": { "happy-dom": "^20.0.0" }
+}
