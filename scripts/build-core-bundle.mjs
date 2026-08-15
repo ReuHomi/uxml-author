@@ -16,6 +16,7 @@ import { build } from 'esbuild';
 import { writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const tmp = mkdtempSync(join(tmpdir(), 'uxml-entry-'));
 const entry = join(tmp, 'entry.js');
@@ -25,6 +26,6 @@ await build({
   entryPoints: [entry],
   bundle: true, platform: 'browser', format: 'iife',
   target: 'es2022', minify: true,
-  outfile: new URL('../src/core.bundle.js', import.meta.url).pathname,
+  outfile: fileURLToPath(new URL('../src/core.bundle.js', import.meta.url)),
 });
 console.log('core.bundle.js written');

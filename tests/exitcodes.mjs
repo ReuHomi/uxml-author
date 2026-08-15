@@ -2,8 +2,9 @@
 // "checked, found a problem" vs "never checked".
 import { execFileSync, execFileSync as run } from 'node:child_process';
 import { writeFileSync, mkdirSync, renameSync, existsSync, rmSync, cpSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const TMP = ROOT + 'tests/tmp/';
 rmSync(TMP, { recursive: true, force: true });
 mkdirSync(TMP + 'Styles', { recursive: true });

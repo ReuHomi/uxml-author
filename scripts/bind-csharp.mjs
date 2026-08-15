@@ -10,10 +10,12 @@
 // Q<T>() starts returning null while everything still compiles.
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, resolve, basename } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseContract, serializeContract, reconcile, csharpTypeFor, isKnownUnityType }
   from '../src/contract.js';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+// See preview.mjs: .pathname breaks on Windows.
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 function cannotRun(msg, hint) {
   console.error('DID NOT RUN — ' + msg);

@@ -2,6 +2,7 @@
 // A condition whose mutation still passes is not a condition.
 import { readFileSync } from 'node:fs';
 import { Window } from 'happy-dom';
+import { fileURLToPath } from 'node:url';
 
 const w = new Window({ url: 'http://localhost' });
 Object.assign(globalThis, {
@@ -9,7 +10,7 @@ Object.assign(globalThis, {
   Node: w.Node, getComputedStyle: w.getComputedStyle.bind(w),
 });
 
-const root = new URL('..', import.meta.url).pathname;
+const root = fileURLToPath(new URL('..', import.meta.url));
 await import(root + 'src/core.bundle.js');
 const core = globalThis.UxmlCore;
 await core.loadLayoutEngine();

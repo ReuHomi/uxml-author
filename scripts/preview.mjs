@@ -13,8 +13,12 @@
 // one is how a skill starts shipping unverified files quietly.
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+// fileURLToPath, not .pathname: on Windows the latter yields '/C:/Users/...',
+// which fs cannot open. Unity development is largely a Windows activity, so
+// this is not an edge case here.
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PER_ASSET_LIMIT = 512 * 1024;   // bytes on disk, before base64
 const TOTAL_ASSET_LIMIT = 2 * 1024 * 1024;
 

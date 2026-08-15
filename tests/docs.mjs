@@ -4,8 +4,9 @@
 // longer true. These run the real thing and compare.
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const SKILL = readFileSync(ROOT + 'SKILL.md', 'utf8');
 const T = ROOT + 'tests/tmpdoc/';
 rmSync(T, { recursive: true, force: true });
@@ -166,6 +167,21 @@ section('the lockfile can be installed as Claude Code installs it');
     'no devDependencies: npm ci installs those too, onto every user who installs the plugin');
   expect(Object.keys(pkg.dependencies).join(',') === 'happy-dom',
     'happy-dom is the only runtime dependency');
+}
+
+section('paths work off Windows drive letters');
+{
+  // `new URL(...).pathname` yields '/C:/Users/...' on Windows and fs cannot open
+  // that. Unity development is largely a Windows activity, so this is a plain
+  // portability requirement rather than an edge case, and it cannot be tested
+  // from Linux — the check is on the shape of the code instead.
+  const sources = ['scripts/preview.mjs', 'scripts/bind-csharp.mjs', 'scripts/build-core-bundle.mjs',
+                   'tests/conditions.mjs', 'tests/exitcodes.mjs', 'tests/binding.mjs', 'tests/docs.mjs'];
+  sources.forEach((f) => {
+    const src = readFileSync(ROOT + f, 'utf8');
+    const bad = /import\.meta\.url\)\.pathname|import\.meta\.url\s*\)\s*\.pathname/.test(src);
+    expect(!bad, `${f} converts a file URL with fileURLToPath, not .pathname`);
+  });
 }
 
 section('no number is quoted without its unit');

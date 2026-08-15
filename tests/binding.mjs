@@ -2,8 +2,9 @@
 // case therefore regenerates and compares.
 import { execFileSync } from 'node:child_process';
 import { writeFileSync, readFileSync, mkdirSync, rmSync, existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const T = ROOT + 'tests/tmp3/';
 rmSync(T, { recursive: true, force: true });
 mkdirSync(T, { recursive: true });
@@ -125,7 +126,7 @@ section('L / M — a removed element retires, and says so');
   writeFileSync(patched, src
     .replace("events.retired.forEach((e) => problems.push(", "[].forEach((e) => problems.push(")
     .replace("from '../src/contract.js'", "from '" + ROOT + "src/contract.js'")
-    .replace("new URL('..', import.meta.url).pathname", JSON.stringify(ROOT)));
+    .replace("fileURLToPath(new URL('..', import.meta.url))", JSON.stringify(ROOT)));
   writeFileSync(T + 'm1.uxml', TWO);
   writeFileSync(T + 'm1.json', JSON.stringify({ uxml: 'm1.uxml', out: 'm1.cs', contract: 'l1-contract.md' }));
   let code = 0;
@@ -252,7 +253,7 @@ section('T — regenerating never touches your half');
   writeFileSync(patched, src
     .replace('if (!logicExisted) writeFileSync(logicPath', 'writeFileSync(logicPath')
     .replace("from '../src/contract.js'", "from '" + ROOT + "src/contract.js'")
-    .replace("new URL('..', import.meta.url).pathname", JSON.stringify(ROOT)));
+    .replace("fileURLToPath(new URL('..', import.meta.url))", JSON.stringify(ROOT)));
   writeFileSync(T + 't2.uxml', THREE);
   writeFileSync(T + 't2.json', JSON.stringify({
     uxml: 't2.uxml', className: 't2Controller', contract: 't2-contract.md' }));

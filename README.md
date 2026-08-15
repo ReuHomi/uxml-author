@@ -30,6 +30,11 @@ to learn and no commands to memorise.
 `happy-dom` is installed for you, and the skill is available in your next
 session.
 
+**Codex CLI, Gemini CLI, OpenClaw, Cursor** and other agents that read the
+SKILL.md format take the same folder; only the directory differs
+(`~/.codex/skills/`, `~/.gemini/skills/`, `.cursor/skills/`). Nothing in this
+skill is Claude-specific: it is a SKILL.md, a few Node scripts, and an exit code.
+
 **Anywhere else — hand the address to your agent and ask it to install.**
 
 ```
@@ -48,7 +53,7 @@ cd ~/.claude/skills/uxml-author && npm install
 
 Start a fresh session afterwards — skill metadata is read once, at session start.
 
-**Requirements.** Node 18 or newer. `happy-dom` is the only runtime dependency;
+**Requirements.** Node 18 or newer, on Windows, macOS or Linux. `happy-dom` is the only runtime dependency;
 the renderer itself is committed as a single pre-built file, so there is nothing
 to compile and no Unity install involved.
 
