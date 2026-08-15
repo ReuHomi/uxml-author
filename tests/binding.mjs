@@ -125,7 +125,7 @@ section('L / M — a removed element retires, and says so');
   const patched = T + 'quiet-bind.mjs';
   writeFileSync(patched, src
     .replace("events.retired.forEach((e) => problems.push(", "[].forEach((e) => problems.push(")
-    .replace("from '../src/contract.js'", "from '" + ROOT + "src/contract.js'")
+    .replace("from '../src/contract.js'", "from '" + pathToFileURL(ROOT + 'src/contract.js').href + "'")
     .replace("fileURLToPath(new URL('..', import.meta.url))", JSON.stringify(ROOT)));
   writeFileSync(T + 'm1.uxml', TWO);
   writeFileSync(T + 'm1.json', JSON.stringify({ uxml: 'm1.uxml', out: 'm1.cs', contract: 'l1-contract.md' }));
@@ -252,7 +252,7 @@ section('T — regenerating never touches your half');
   const patched = T + 'greedy-bind.mjs';
   writeFileSync(patched, src
     .replace('if (!logicExisted) writeFileSync(logicPath', 'writeFileSync(logicPath')
-    .replace("from '../src/contract.js'", "from '" + ROOT + "src/contract.js'")
+    .replace("from '../src/contract.js'", "from '" + pathToFileURL(ROOT + 'src/contract.js').href + "'")
     .replace("fileURLToPath(new URL('..', import.meta.url))", JSON.stringify(ROOT)));
   writeFileSync(T + 't2.uxml', THREE);
   writeFileSync(T + 't2.json', JSON.stringify({

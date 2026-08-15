@@ -52,8 +52,7 @@ const SHEETS = {
   'Styles/Theme.uss': `#Panel { width: 260px; padding: 12px; }`,
 };
 
-const B64 = readFileSync('/tmp/t.b64', 'utf8');   // 64x32 png
-const DATA_URI = 'data:image/png;base64,' + B64;
+const DATA_URI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLh8QAAAABJRU5ErkJggg==';
 
 // ── A is checked by the build script (byte identity of the inlined copies) ──
 
