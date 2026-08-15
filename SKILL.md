@@ -230,6 +230,5 @@ that on.
 - Drive or install the Unity editor. This produces files.
 - Write into someone's project without being asked.
 - Restate the USS mapping tables. Link to them.
-- Build an assembly API, a CLI, or an MCP server. You are the interface.
 - Quote accuracy figures without their units. If unsure, link `docs/accuracy.md`
   instead of naming a number.

@@ -57,5 +57,14 @@ did nothing because upscaling was capped at 1×.
   `VisualElement`, which is a floor rather than an answer, and are reported.
 - **Whether Unity uses a texture's intrinsic size for an unsized `<ui:Image>`.**
   Our renderer does not; Unity was not measured. Give images an explicit size.
+- **Why `npm test` crashes on Windows.** The first suite passes every assertion
+  and then exits `0xC0000005` during teardown. A probe covering the same
+  operations in isolation — window left open, window closed, twenty
+  render/dispose cycles, repeated redefinition of the check module — exits
+  cleanly in all seven cases, so three plausible causes are ruled out and none
+  is established. The scripts the skill calls are unaffected: cases 4 to 6 in
+  that probe are what `preview.mjs` does, and a real screen was authored on
+  Windows through the skill. Contributors should run the suites one at a time.
+
 - **That SKILL.md makes an agent behave as intended.** The document is checked
   against the code, not against a model's behaviour.

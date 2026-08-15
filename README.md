@@ -148,6 +148,20 @@ The suites check their own mutations: each one deliberately breaks the behaviour
 it guards and confirms the check fails. A test that passes either way proves
 nothing.
 
+**Known, on Windows:** the first suite prints every assertion, passes all of
+them, and then exits with `0xC0000005` as the process tears down, which stops
+`npm test` before the remaining three run. The cause is not known — an isolated
+probe of the same operations, including twenty render/dispose cycles, exits
+cleanly. Run the suites individually until it is understood:
+
+```bash
+node tests/conditions.mjs && node tests/exitcodes.mjs
+node tests/binding.mjs && node tests/docs.mjs
+```
+
+This affects contributors only. The scripts the skill actually calls are
+unaffected on Windows, which the same probe confirms.
+
 ## Not in scope
 
 Driving or installing the Unity editor. Generating game logic. Widening control
