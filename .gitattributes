@@ -1,0 +1,9 @@
+# core.bundle.js is a minified build artefact with a base64 payload on one line,
+# and Windows clones default to autocrlf. Marking these binary keeps a checkout
+# byte-identical to what was committed, which the preview page's byte-identity
+# check depends on.
+src/core.bundle.js binary
+*.png binary
+
+# Templates become C# and markdown in someone's project; leave the endings alone.
+templates/* -text

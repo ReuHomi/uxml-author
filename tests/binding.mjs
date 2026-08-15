@@ -2,7 +2,7 @@
 // case therefore regenerates and compares.
 import { execFileSync } from 'node:child_process';
 import { writeFileSync, readFileSync, mkdirSync, rmSync, existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const T = ROOT + 'tests/tmp3/';

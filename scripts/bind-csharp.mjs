@@ -10,7 +10,7 @@
 // Q<T>() starts returning null while everything still compiles.
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, resolve, basename } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseContract, serializeContract, reconcile, csharpTypeFor, isKnownUnityType }
   from '../src/contract.js';
 
@@ -40,7 +40,8 @@ const uxmlName = basename(job.uxml);
 // ── the renderer's parser, so the C# and the preview read the same tree ──────
 let core;
 try {
-  await import(ROOT + 'src/core.bundle.js');
+  // See preview.mjs: a bare absolute path is not importable on Windows.
+  await import(pathToFileURL(ROOT + 'src/core.bundle.js').href);
   core = globalThis.UxmlCore;
 } catch (e) { cannotRun('the parser bundle failed to load: ' + e.message); }
 

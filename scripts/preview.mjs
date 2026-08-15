@@ -13,7 +13,7 @@
 // one is how a skill starts shipping unverified files quietly.
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // fileURLToPath, not .pathname: on Windows the latter yields '/C:/Users/...',
 // which fs cannot open. Unity development is largely a Windows activity, so
@@ -59,8 +59,10 @@ Object.assign(globalThis, {
 });
 
 try {
-  await import(ROOT + 'src/core.bundle.js');
-  await import(ROOT + 'src/check.js');
+  // pathToFileURL, not a bare path: on Windows `import('C:\\...')` is read as a
+  // URL whose scheme is `C:` and throws ERR_UNSUPPORTED_ESM_URL_SCHEME.
+  await import(pathToFileURL(ROOT + 'src/core.bundle.js').href);
+  await import(pathToFileURL(ROOT + 'src/check.js').href);
 } catch (e) { cannotRun('the renderer bundle failed to load: ' + e.message); }
 const core = globalThis.UxmlCore;
 const check = globalThis.UxmlCheck;

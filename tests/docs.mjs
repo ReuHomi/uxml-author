@@ -4,7 +4,7 @@
 // longer true. These run the real thing and compare.
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const SKILL = readFileSync(ROOT + 'SKILL.md', 'utf8');
@@ -84,7 +84,7 @@ section('the exit codes are what the table says');
 
 section('the controls called unsupported are unsupported');
 {
-  await import(ROOT + 'src/core.bundle.js');
+  await import(pathToFileURL(ROOT + 'src/core.bundle.js').href);
   const supported = globalThis.UxmlCore.supportedControlNames();
 
   // Read the list out of the document rather than comparing against a list
@@ -158,7 +158,12 @@ section('the lockfile can be installed as Claude Code installs it');
   // a warning in a debug log, so the user meets a missing happy-dom instead —
   // and the tooling reports code 2 with no idea why.
   let code = 0;
-  try { execFileSync('npm', ['ci', '--dry-run', '--ignore-scripts'], { cwd: ROOT, stdio: 'pipe' }); }
+  // shell: true because on Windows the executable is npm.cmd, and execFileSync
+  // without a shell reports ENOENT for it.
+  try {
+    execFileSync('npm', ['ci', '--dry-run', '--ignore-scripts'],
+      { cwd: ROOT, stdio: 'pipe', shell: true });
+  }
   catch (e) { code = e.status; }
   expect(code === 0, 'npm ci accepts package.json and package-lock.json as a pair');
 
@@ -179,9 +184,25 @@ section('paths work off Windows drive letters');
                    'tests/conditions.mjs', 'tests/exitcodes.mjs', 'tests/binding.mjs', 'tests/docs.mjs'];
   sources.forEach((f) => {
     const src = readFileSync(ROOT + f, 'utf8');
-    const bad = /import\.meta\.url\)\.pathname|import\.meta\.url\s*\)\s*\.pathname/.test(src);
-    expect(!bad, `${f} converts a file URL with fileURLToPath, not .pathname`);
+    expect(!/import\.meta\.url\s*\)\s*\.pathname/.test(src),
+      `${f} converts a file URL with fileURLToPath, not .pathname`);
+
+    // `import('C:\\...')` is read as a URL whose scheme is "C:" and throws
+    // ERR_UNSUPPORTED_ESM_URL_SCHEME. An absolute path has to become a file URL
+    // before it can be imported.
+    const bareImport = [...src.matchAll(/await import\(([^)]*)\)/g)]
+      .map((m) => m[1])
+      .filter((arg) => /ROOT|root|here|patched/.test(arg) && !/pathToFileURL/.test(arg));
+    expect(bareImport.length === 0,
+      `${f} imports absolute paths as file URLs` +
+      (bareImport.length ? ': ' + bareImport.join(', ') : ''));
   });
+
+  // npm is npm.cmd on Windows, and execFileSync without a shell reports ENOENT.
+  const docsSrc = readFileSync(ROOT + 'tests/docs.mjs', 'utf8');
+  const npmCalls = [...docsSrc.matchAll(/execFileSync\('npm'[\s\S]{0,200}?\}\)/g)].map((m) => m[0]);
+  expect(npmCalls.length > 0 && npmCalls.every((c) => /shell:\s*true/.test(c)),
+    'every npm invocation runs through a shell');
 }
 
 section('no number is quoted without its unit');
