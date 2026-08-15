@@ -20,7 +20,17 @@ to learn and no commands to memorise.
 
 ## Install
 
-**Hand this address to your agent and ask it to install the skill.**
+**In Claude Code**, two lines:
+
+```
+/plugin marketplace add ReuHomi/uxml-author
+/plugin install uxml-author@uxml-author
+```
+
+`happy-dom` is installed for you, and the skill is available in your next
+session.
+
+**Anywhere else — hand the address to your agent and ask it to install.**
 
 ```
 https://github.com/ReuHomi/uxml-author
@@ -28,20 +38,19 @@ https://github.com/ReuHomi/uxml-author
 
 > Install the skill at https://github.com/ReuHomi/uxml-author
 
-Claude Code, Cowork, and Codex can all clone a repository and place it where
-skills live. If you would rather do it yourself:
+Cowork, Codex, Cursor and other agents that read the SKILL.md format can clone a
+repository and put it where skills live. If you would rather do it yourself:
 
 ```bash
-git clone https://github.com/ReuHomi/uxml-author
-cd uxml-author && npm install
+git clone https://github.com/ReuHomi/uxml-author ~/.claude/skills/uxml-author
+cd ~/.claude/skills/uxml-author && npm install
 ```
 
-Then copy or symlink the folder into your agent's skills directory —
-`~/.claude/skills/` for Claude Code.
+Start a fresh session afterwards — skill metadata is read once, at session start.
 
-**Requirements.** Node 18 or newer. `npm install` pulls in `happy-dom`, which is
-the only runtime dependency; the renderer itself is committed as a single
-pre-built file, so there is nothing to compile and no Unity install involved.
+**Requirements.** Node 18 or newer. `happy-dom` is the only runtime dependency;
+the renderer itself is committed as a single pre-built file, so there is nothing
+to compile and no Unity install involved.
 
 Without `happy-dom` the preview still renders in a browser — it needs no Node at
 all — but the automatic checks cannot run, and the skill will tell you so rather

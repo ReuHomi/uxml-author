@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "uxml-author",
+  "version": "0.1.0",
+  "description": "Unity UI Toolkit authoring for agents.",
+  "owner": { "name": "ReuHomi", "url": "https://github.com/ReuHomi" },
+  "plugins": [
+    {
+      "name": "uxml-author",
+      "description": "Design Unity UI Toolkit screens from a description or a sketch, check the layout headlessly, and hand over a self-contained HTML preview that reports what it could not draw.",
+      "source": "./",
+      "category": "development",
+      "tags": ["unity", "ui-toolkit", "uxml", "uss", "game-development"]
+    }
+  ]
+}

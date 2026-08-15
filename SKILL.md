@@ -129,6 +129,13 @@ in the project and Unity will not show them. Resolving an asset makes the
 renderer fall silent, so this line comes from our own bookkeeping — a supplied
 image is the one case where helping could have quietly erased a warning.
 
+If you draw or generate a placeholder image so the preview reads better, pass it
+through `assets` like any other supplied file. It lands in the channel above and
+is reported as absent from the project. Never let a placeholder imply the asset
+exists — a preview that looks more finished than the project is the failure this
+tool is built against, and it is the one case where trying to help removes a
+warning the person needed.
+
 **Collapsed to zero size.** A failure that raises no warning at all. Usually a
 `<ui:Image>` with no size in the USS, or a container whose children could not
 give it a height. Always fix these.

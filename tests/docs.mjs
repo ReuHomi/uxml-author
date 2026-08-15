@@ -129,6 +129,45 @@ section('the file table matches what the generators write');
     'only Button.clicked is wired, as the C# section claims');
 }
 
+section('the name is one name in every file that carries it');
+{
+  // Once published, a marketplace slug cannot change without breaking every
+  // existing install, so these four must never drift apart.
+  const plugin = JSON.parse(readFileSync(ROOT + '.claude-plugin/plugin.json', 'utf8'));
+  const market = JSON.parse(readFileSync(ROOT + '.claude-plugin/marketplace.json', 'utf8'));
+  const pkg = JSON.parse(readFileSync(ROOT + 'package.json', 'utf8'));
+  const frontmatter = SKILL.match(/^name:\s*(\S+)$/m);
+
+  expect(!!frontmatter, 'SKILL.md declares a name in its frontmatter');
+  const name = frontmatter[1];
+  expect(plugin.name === name, `plugin.json name is ${name}`);
+  expect(pkg.name === name, `package.json name is ${name}`);
+  expect(market.plugins.length === 1 && market.plugins[0].name === name,
+    `the marketplace lists exactly one plugin, ${name}`);
+  expect(market.plugins[0].source === './',
+    'and points at the repository root, where SKILL.md lives');
+  expect(new RegExp(name).test(readFileSync(ROOT + 'README.md', 'utf8')),
+    'the README uses the same name');
+}
+
+section('the lockfile can be installed as Claude Code installs it');
+{
+  // Claude Code runs `npm ci --ignore-scripts` when it caches the plugin, and a
+  // lockfile out of step with package.json makes that fail. The failure is only
+  // a warning in a debug log, so the user meets a missing happy-dom instead —
+  // and the tooling reports code 2 with no idea why.
+  let code = 0;
+  try { execFileSync('npm', ['ci', '--dry-run', '--ignore-scripts'], { cwd: ROOT, stdio: 'pipe' }); }
+  catch (e) { code = e.status; }
+  expect(code === 0, 'npm ci accepts package.json and package-lock.json as a pair');
+
+  const pkg = JSON.parse(readFileSync(ROOT + 'package.json', 'utf8'));
+  expect(!pkg.devDependencies,
+    'no devDependencies: npm ci installs those too, onto every user who installs the plugin');
+  expect(Object.keys(pkg.dependencies).join(',') === 'happy-dom',
+    'happy-dom is the only runtime dependency');
+}
+
 section('no number is quoted without its unit');
 {
   // Accuracy figures are the one place this project has repeatedly misled

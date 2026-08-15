@@ -9,6 +9,7 @@
     "test": "node tests/conditions.mjs && node tests/exitcodes.mjs && node tests/binding.mjs && node tests/docs.mjs",
     "build:core": "node scripts/build-core-bundle.mjs"
   },
-  "devDependencies": { "esbuild": "^0.25.0", "uxml-preview": "0.4.0" },
-  "dependencies": { "happy-dom": "^20.0.0" }
+  "dependencies": {
+    "happy-dom": "^20.0.0"
+  }
 }

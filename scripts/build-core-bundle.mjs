@@ -6,6 +6,12 @@
 //
 // Because there is only one renderer there is nothing to keep in sync, so this
 // script carries no version stamp and no drift check. That is the point.
+// Maintainers only, and deliberately not a dependency: Claude Code runs
+// `npm ci` on plugin install, which would then pull esbuild's platform binaries
+// onto every user's machine for a script none of them run.
+//
+//   npm install --no-save esbuild uxml-preview@0.4.0
+//
 import { build } from 'esbuild';
 import { writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
