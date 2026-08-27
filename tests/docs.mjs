@@ -255,6 +255,33 @@ section('no number is quoted without its unit');
   expect(/docs\/accuracy\.md/.test(SKILL), 'it links the accuracy document instead');
 }
 
+{
+  // The bundle is a committed build artifact, and the failure it invites is a
+  // stale one: someone reaches for a newer core API in check.js and forgets to
+  // rebuild. Everything still loads, and the feature is simply absent at run
+  // time. So the artifact has to say which core it came from, and it has to
+  // actually contain what the code around it calls.
+  const bundle = readFileSync(ROOT + 'src/core.bundle.js', 'utf8');
+  const stamp = bundle.match(/uxml-preview (\d+\.\d+\.\d+)/);
+  expect(!!stamp, 'the bundle names the core version it was built from');
+  expect(/GENERATED FILE/.test(bundle) && /npm run build:core/.test(bundle),
+    'and says it is generated, and how to regenerate it');
+
+  const buildScript = readFileSync(ROOT + 'scripts/build-core-bundle.mjs', 'utf8');
+  const hinted = buildScript.match(/uxml-preview@(\d+\.\d+\.\d+)/);
+  expect(!!hinted && !!stamp && hinted[1] === stamp[1],
+    `the install hint in the build script matches the bundle: ${hinted && hinted[1]} vs ${stamp && stamp[1]}`);
+
+  // Named one at a time rather than through a list kept somewhere: a list would
+  // be a third place to forget.
+  for (const api of ['collectDependencies', 'expandTemplates', 'loadLayoutEngine', 'parse', 'render', 'serialize']) {
+    expect(bundle.includes(api + ':'), `the bundle exports ${api}, which the code calls`);
+  }
+
+  expect(bundle.split('\n').length > 100,
+    'and it is not minified onto a handful of lines, so a core bump is reviewable');
+}
+
 rmSync(T, { recursive: true, force: true });
 console.log(failures ? `\nFAILED: ${failures}` : '\ndocumentation matches the code');
 process.exit(failures ? 1 : 0);

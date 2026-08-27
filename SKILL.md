@@ -136,6 +136,13 @@ exists — a preview that looks more finished than the project is the failure th
 tool is built against, and it is the one case where trying to help removes a
 warning the person needed.
 
+**Names that address more than one element.** Not a fault in the screen. Once a
+template is instantiated twice, every `name` inside it exists twice, and that is
+correct UXML — Unity does the same. It matters only on the C# side, where
+`Q<T>(name)` returns the first match, so `bind-csharp` refuses those names rather
+than deriving fields that would all point at one element. Report it as a
+constraint on the code, never as a broken screen.
+
 **Collapsed to zero size.** A failure that raises no warning at all. Usually a
 `<ui:Image>` with no size in the USS, or a container whose children could not
 give it a height. Always fix these.
@@ -143,6 +150,45 @@ give it a height. Always fix these.
 `Measured on Unity 6000.0.40f1` is a standing condition, not an event. It fires
 whenever a control uses theme defaults. Do not treat it as a problem and do not
 lead with it.
+
+## Screens assembled from more than one file
+
+Real projects rarely keep a screen in one file. A reusable piece lives in its own
+`.uxml` and the screen pulls it in:
+
+```xml
+<ui:Template name="Slot" src="Parts/ItemSlot.uxml" />
+<ui:Instance template="Slot" name="slot-a">
+  <ui:AttributeOverrides element-name="slot-label" text="Sword" />
+</ui:Instance>
+```
+
+The preview follows those references, reads every document behind the screen, and
+draws the result. Nothing extra is needed in the job file; give it the entry UXML
+and the rest is found. Supply `templates` only to override where a specific one
+comes from, the same way `sheets` works.
+
+Four things are worth knowing before you write one.
+
+**A mistyped `element-name` is the one thing here Unity does not catch.** Unity
+applies an override that matches nothing in complete silence — the value simply
+stays as it was, and the person hunts for a styling problem that is not there.
+This is the single place where the preview tells them something the editor never
+will. When the report names one, lead with it.
+
+**An instance is a `TemplateContainer` in the hierarchy,** and that is what the
+generated C# binds it as. Its `name` is yours to bind; the names *inside* the
+template belong to that template's own file and its own controller. The contract
+deliberately does not reach across that boundary.
+
+**A missing template is not a missing stylesheet.** An unresolved `<Style src>`
+leaves the screen unstyled; an unresolved template leaves whole regions absent.
+The report says which, and both exit 1.
+
+**Slots are not drawn.** `slot-name` / `slot` are alive in Unity 6000.0.40f1 —
+measured, not assumed — but this version does not place slot children. They are
+reported instead of being dropped somewhere arbitrary, and they appear in *Not
+drawn by this version*, alongside the fallback controls.
 
 ## USS is not CSS
 
@@ -198,6 +244,11 @@ the break appears at runtime, far from the edit that caused it.
   change and an accident should not look alike.
 - Removing an element retires its row rather than deleting it, and exits 1. Tell
   the person which C# will start getting null.
+- One name, one element. If a name appears twice the generator writes nothing
+  and exits 1: `Q<T>()` returns the first match, so fields derived from a
+  repeated name would all reach the same element while still compiling. Repeats
+  are normal *inside* an instantiated template, which is why the contract reads
+  the document unexpanded.
 - If the contract cannot be parsed the run stops at code 2 and writes nothing.
   Do not "start over" by deleting it — that erases every retired name in it.
 
