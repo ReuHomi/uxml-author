@@ -46,11 +46,22 @@ export function fieldNameFor(uxmlName, taken) {
   return out;
 }
 
+// A UXML tag that is not the name of the class Unity puts in the hierarchy.
+// `<ui:Instance>` is the only one: expansion replaces it with a TemplateContainer
+// and the instance's `name` attaches to that container — measured on 6000.0.40f1,
+// not inferred. Without this the tag falls through to the VisualElement floor and
+// gets reported as unrecognised, which is a warning about a fact we know.
+const TAG_TO_TYPE = new Map([
+  ['Instance', 'TemplateContainer'],
+]);
+
 export function csharpTypeFor(elementType) {
+  const mapped = TAG_TO_TYPE.get(elementType);
+  if (mapped) return mapped;
   return UNITY_TYPES.has(elementType) ? elementType : 'VisualElement';
 }
 export function isKnownUnityType(elementType) {
-  return UNITY_TYPES.has(elementType);
+  return TAG_TO_TYPE.has(elementType) || UNITY_TYPES.has(elementType);
 }
 
 const HEADER = [
@@ -84,7 +95,37 @@ export function parseContract(text) {
     }
     rows.push({ name, element, type, field, status, note });
   }
+  // Two rows for one name make `prevByName` ambiguous, and the loser is dropped
+  // silently — the field it holds then drifts on every regeneration. A contract
+  // that cannot be read one way is unreadable, so this throws like the rest.
+  const byName = new Map();
+  for (const r of rows) {
+    if (byName.has(r.name)) {
+      throw new Error(
+        `contract has two rows for name "${r.name}" (fields "${byName.get(r.name).field}" ` +
+        `and "${r.field}"); one of them would be dropped on the next run`);
+    }
+    byName.set(r.name, r);
+  }
   return rows;
+}
+
+/**
+ * Purpose: find names that more than one element carries.
+ * Ensures: returns Map<name, count> holding only counts above one, in first-seen
+ *          order. Empty means every name addresses exactly one element.
+ *
+ * Why this is a hard stop rather than a note: `Q<T>(name)` returns the FIRST
+ * match, so N fields derived from one name all point at the same element while
+ * the C# still compiles. That is the drift this contract exists to prevent, and
+ * it is invisible at runtime until something is wired to the wrong box.
+ */
+export function duplicateNames(elements) {
+  const counts = new Map();
+  for (const el of elements) counts.set(el.name, (counts.get(el.name) || 0) + 1);
+  const dupes = new Map();
+  for (const [name, n] of counts) if (n > 1) dupes.set(name, n);
+  return dupes;
 }
 
 export function serializeContract(title, rows) {
