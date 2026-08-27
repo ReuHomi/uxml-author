@@ -11,7 +11,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, resolve, basename } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { parseContract, serializeContract, reconcile, csharpTypeFor, isKnownUnityType }
+import { parseContract, serializeContract, reconcile, csharpTypeFor, isKnownUnityType, duplicateNames }
   from '../src/contract.js';
 
 // See preview.mjs: .pathname breaks on Windows.
@@ -45,6 +45,16 @@ try {
   core = globalThis.UxmlCore;
 } catch (e) { cannotRun('the parser bundle failed to load: ' + e.message); }
 
+// Parsed, NOT expanded — a deliberate line, and the one place in this repo where
+// the two consumers see different trees. The preview must expand, because it
+// judges a screen and half the screen would otherwise be missing. The contract
+// must not, because it answers a different question: which names does THIS
+// document own? An instance's inner names belong to the template's own file and
+// its own controller; pulling them in would make one C# class reach across a
+// file boundary, and every repeated instance would collide on the way. What the
+// entry document owns is the `name` on each `<ui:Instance>` itself, which is the
+// TemplateContainer — and that is bindable, being exactly what Unity puts in the
+// hierarchy.
 let doc;
 try { doc = core.parse(uxmlText, undefined, { resolveImport: () => null }); }
 catch (e) { cannotRun('the UXML did not parse: ' + e.message); }
@@ -65,6 +75,23 @@ const NOT_ELEMENTS = new Set(['UXML', 'Style', 'Template', 'AttributeOverrides']
   }
   node.children.forEach(walk);
 })(doc.root);
+
+// ── refuse before writing anything ───────────────────────────────────────────
+// Checked here, not after generation: a Bindings.cs missing some fields while
+// the hand-written Logic.cs still reaches for them is worse than no file.
+const dupes = duplicateNames(elements);
+if (dupes.size) {
+  console.error(`${uxmlName} uses the same name for more than one element, so C# cannot`);
+  console.error('address them apart — Q<T>(name) returns the first match and the rest are');
+  console.error('unreachable. Nothing was written.');
+  console.error('');
+  for (const [name, n] of dupes) console.error(`  "${name}" — ${n} elements`);
+  console.error('');
+  console.error('Give each one its own name, or drop the name and select by class if the');
+  console.error('code does not need to reach it. A repeated name is legal UXML and Unity');
+  console.error('will not complain; it is the C# side that cannot work with it.');
+  process.exit(1);
+}
 
 if (elements.length === 0) {
   console.log('no element in ' + uxmlName + ' carries a name attribute, so there is nothing');

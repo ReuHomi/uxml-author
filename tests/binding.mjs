@@ -24,7 +24,16 @@ const TWO = uxml(`  <ui:VisualElement name="Panel">
     <ui:Label name="Title" text="Inventory" />
   </ui:VisualElement>`);
 
-function run(name, { source, renames, contract } = {}) {
+// A case name is also a file name here, so reusing one silently feeds a previous
+// case's contract into this one — which is exactly the state this file tests for,
+// and it read as a real failure twice while these cases were being written. A
+// deliberate second run passes `again`.
+const usedNames = new Set();
+function run(name, { source, renames, contract, again } = {}) {
+  if (usedNames.has(name) && !again) {
+    throw new Error(`case name "${name}" is already in use; pass { again: true } if the reuse is the point`);
+  }
+  usedNames.add(name);
   const u = T + name + '.uxml';
   writeFileSync(u, source ?? THREE);
   const job = {
@@ -50,7 +59,7 @@ function run(name, { source, renames, contract } = {}) {
 section('K — the names come from the structure, not from a model');
 {
   const a = run('k1');
-  const b = run('k1');
+  const b = run('k1', { again: true });
   expect(a.cs === b.cs, 'the same UXML twice produces byte-identical C#');
   expect(a.contract === b.contract, 'and a byte-identical contract — nothing transient is stored');
   expect(/private Button useButton;/.test(a.cs), 'UseButton → useButton, mechanically');
@@ -63,7 +72,7 @@ section('K — the names come from the structure, not from a model');
   // of anything variable.
   const a = run('k2');
   rmSync(T + 'k2-contract.md');
-  const b = run('k2');
+  const b = run('k2', { again: true });
   expect(a.cs === b.cs && a.contract === b.contract,
     'with no prior contract either time, both runs still match exactly');
 }
@@ -77,7 +86,7 @@ section('K — the names come from the structure, not from a model');
   const fields = [...clash.cs.matchAll(/private \w+ (\w+);/g)].map((m) => m[1]);
   expect(new Set(fields).size === fields.length,
     'three names that sanitise alike get distinct fields: ' + fields.join(', '));
-  const again = run('k3', {
+  const again = run('k3', { again: true,
     source: uxml(`  <ui:VisualElement name="Use-Button">
     <ui:Button name="UseButton" />
     <ui:Label name="use_button" />
@@ -93,8 +102,8 @@ section('K — the names come from the structure, not from a model');
   // Our own error message tells the user they may restore the element. Check
   // that doing so gives the field back rather than minting a second one.
   run('k5');
-  run('k5', { source: TWO });                // UseButton retired
-  const restored = run('k5');                // put it back
+  run('k5', { again: true, source: TWO });                // UseButton retired
+  const restored = run('k5', { again: true });                // put it back
   expect(/private Button useButton;/.test(restored.cs) && !/useButton2/.test(restored.cs),
     'restoring a retired element returns its original field, as the advice promises');
   expect(/was retired, now back/.test(restored.out), 'and the return is reported');
@@ -110,7 +119,7 @@ section('K — the names come from the structure, not from a model');
 section('L / M — a removed element retires, and says so');
 {
   run('l1');                                   // three elements
-  const after = run('l1', { source: TWO });    // UseButton removed
+  const after = run('l1', { again: true, source: TWO });    // UseButton removed
   expect(/\| UseButton \|.*\| retired \|/.test(after.contract),
     'UseButton is marked retired rather than dropped');
   expect(!/private Button useButton;/.test(after.cs), 'and it is no longer declared in C#');
@@ -138,7 +147,7 @@ section('L / M — a removed element retires, and says so');
 section('N — a redesign does not move an existing field');
 {
   run('n1');
-  const moved = run('n1', {
+  const moved = run('n1', { again: true,
     source: uxml(`  <ui:ScrollView name="Panel" class="rebuilt">
     <ui:Button name="UseButton" text="Confirm" />
     <ui:Label name="Title" text="Bag" />
@@ -154,7 +163,7 @@ section('N — a redesign does not move an existing field');
 section('O — an intended rename is recorded, so it cannot pass as an accident');
 {
   run('o1');
-  const renamed = run('o1', {
+  const renamed = run('o1', { again: true,
     source: THREE.replace(/UseButton/g, 'ConfirmButton'),
     renames: { UseButton: 'ConfirmButton' },
   });
@@ -166,7 +175,7 @@ section('O — an intended rename is recorded, so it cannot pass as an accident'
 }
 {
   const accidental = run('o2');
-  const noDeclare = run('o2', { source: THREE.replace(/UseButton/g, 'ConfirmButton') });
+  const noDeclare = run('o2', { again: true, source: THREE.replace(/UseButton/g, 'ConfirmButton') });
   expect(/\| UseButton \|.*retired/.test(noDeclare.contract) &&
          /\| ConfirmButton \|/.test(noDeclare.contract),
     'the same edit without declaring it reads as a retirement plus a new name');
@@ -201,7 +210,7 @@ section('R / S — a contract that cannot be trusted stops the run');
   run('r1');
   writeFileSync(T + 'r1-contract.md',
     readFileSync(T + 'r1-contract.md', 'utf8').replace('| active |', '| alive |'));
-  const broken = run('r1');
+  const broken = run('r1', { again: true });
   expect(broken.code === 2, 'an unreadable contract exits 2, not 1');
   expect(/DID NOT RUN/.test(broken.out) && /untouched/.test(broken.out),
     'and says nothing was written');
@@ -213,7 +222,7 @@ section('R / S — a contract that cannot be trusted stops the run');
   const c = readFileSync(T + 'r2-contract.md', 'utf8');
   writeFileSync(T + 'r2-contract.md',
     c.replace('| Title |', '| Ghost | Label | Label | ghost | active |  |\n| Title |'));
-  const ghost = run('r2');
+  const ghost = run('r2', { again: true });
   expect(/\| Ghost \|.*retired/.test(ghost.contract),
     'a name in the contract but not in the UXML is retired');
   expect(ghost.code === 1, 'and reported');
@@ -237,13 +246,13 @@ section('T — regenerating never touches your half');
     .replace('Debug.Log("UseButton pressed");', 'inventory.Consume(selected);  // MY CODE');
   writeFileSync(T + 't1Controller.cs', mine);
 
-  run('t1');                                   // same UXML
-  run('t1', { source: TWO });                  // a redesign that retires a button
-  run('t1');                                   // and back again
+  run('t1', { again: true });                                   // same UXML
+  run('t1', { again: true, source: TWO });                  // a redesign that retires a button
+  run('t1', { again: true });                                   // and back again
   const after = readFileSync(T + 't1Controller.cs', 'utf8');
   expect(after === mine, 'three regenerations later, your file is byte-identical');
   expect(/MY CODE/.test(after), 'including the line you wrote by hand');
-  expect(/left alone/.test(run('t1').out), 'and the run says it left it alone');
+  expect(/left alone/.test(run('t1', { again: true }).out), 'and the run says it left it alone');
 }
 {
   // mutation: write the logic half unconditionally. This is the merge-free
@@ -286,10 +295,74 @@ section('U — the generated half stands alone');
   // A button added after your half exists gets a declaration but no body, and
   // an unimplemented partial compiles away in silence.
   run('u2', { source: TWO });
-  const grown = run('u2');
+  const grown = run('u2', { again: true });
   expect(/is a new button/.test(grown.out) && /compiles away silently/.test(grown.out),
     'a new button whose handler you have not written yet is reported');
   expect(grown.code === 1, 'and it exits 1');
+}
+
+section('N — one name, one element, or nothing is written');
+{
+  // Q<T>(name) returns the first match. Deriving icon / icon2 / icon3 from one
+  // repeated name produces three fields that all point at the same element and
+  // still compile — and on the second run the contract, keyed by name, collapses
+  // them onto one field and emits it three times, which does not compile at all.
+  // Both were silent. Measured before this guard existed; see the run below.
+  const DUPES = uxml(`  <ui:VisualElement name="Panel">
+    <ui:Image name="icon" />
+    <ui:Image name="icon" />
+    <ui:Image name="icon" />
+  </ui:VisualElement>`);
+  const d = run('dupA', { source: DUPES });
+  expect(d.code === 1, 'a repeated name exits 1');
+  expect(d.cs === null && d.logic === null, 'and writes no C# at all');
+  expect(d.contract === null, 'and does not touch the contract');
+  expect(/"icon" — 3 elements/.test(d.out), 'and says which name, and how many');
+
+  // The refusal must not fire on the ordinary case.
+  const clean = run('dupB');
+  expect(clean.code === 0, 'a document with distinct names still passes');
+
+  // A contract that already holds two rows for one name is unreadable, not
+  // repairable: whichever row lost would take its field with it.
+  writeFileSync(T + 'dupC.uxml', THREE);
+  writeFileSync(T + 'dupC.json', JSON.stringify({
+    uxml: 'dupC.uxml', title: 'dupC', className: 'dupCController', contract: 'dupC-contract.md',
+  }));
+  writeFileSync(T + 'dupC-contract.md', [
+    '# UI contract — dupC', '',
+    '| Name | Element | C# type | C# field | Status | Note |',
+    '| --- | --- | --- | --- | --- | --- |',
+    '| Title | Label | Label | title | active |  |',
+    '| Title | Label | Label | title2 | active |  |', '',
+  ].join('\n'));
+  let code3 = 0, out3 = '';
+  try { out3 = execFileSync('node', [ROOT + 'scripts/bind-csharp.mjs', T + 'dupC.json'], { encoding: 'utf8' }); }
+  catch (e) { out3 = (e.stdout || '') + (e.stderr || ''); code3 = e.status; }
+  expect(code3 === 2, 'a contract with two rows for one name is exit 2, not a regeneration');
+  expect(/two rows for name "Title"/.test(out3), 'and names the ambiguous row');
+}
+
+section('O — an instance is a TemplateContainer, and its insides are not ours');
+{
+  // The contract answers "which names does THIS document own?". An instance's
+  // inner names belong to the template's own file, and repeated instances would
+  // collide on the way in — so the generator parses without expanding. What the
+  // entry document does own is the name on the instance itself, which Unity puts
+  // in the hierarchy as a TemplateContainer.
+  const ASSEMBLED = uxml(`  <ui:Template name="Slot" src="Parts/Slot.uxml" />
+  <ui:VisualElement name="Panel">
+    <ui:Instance template="Slot" name="slot-a" />
+    <ui:Instance template="Slot" name="slot-b" />
+  </ui:VisualElement>`);
+  const a = run('asm1', { source: ASSEMBLED });
+  expect(a.code === 0, 'an assembled document binds cleanly');
+  expect(/private TemplateContainer slotA;/.test(a.cs) || /private TemplateContainer slota;/.test(a.cs),
+    'an instance binds as TemplateContainer, not as the VisualElement floor');
+  expect(!/unrecognised/.test(a.out), 'and is not reported as an unknown type');
+  expect(!/slot-label|slot-root/.test(a.cs),
+    "and the template's own inner names stay out of this document's contract");
+  expect(!/<Template>|templateRow/.test(a.cs), 'the declaration itself is not an element to bind');
 }
 
 console.log(failures ? `\nFAILED: ${failures}` : '\nall Step 3 conditions hold');

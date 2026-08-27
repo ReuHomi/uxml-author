@@ -16,15 +16,23 @@ let failures = 0;
 const expect = (c, what) => { if (!c) failures++; console.log((c ? '  ok   ' : '  FAIL ') + what); };
 const section = (s) => console.log('\n' + s);
 
+// `\r?\n` rather than `\n`: a clone with core.autocrlf=true hands this file back
+// with CRLF, the pattern matched nothing, and the destructure below then threw
+// on undefined — the suite died with a TypeError instead of naming a failure.
+// .gitattributes now normalises the checkout, and this is the second line of
+// defence: a checker that crashes tells the caller nothing about what it saw.
 function jsonBlocks() {
-  return [...SKILL.matchAll(/```json\n([\s\S]*?)```/g)].map((m) => JSON.parse(m[1]));
+  return [...SKILL.matchAll(/```json\r?\n([\s\S]*?)```/g)].map((m) => JSON.parse(m[1]));
 }
 
 section('the job files in the documentation are the job files the scripts read');
 {
   const blocks = jsonBlocks();
-  expect(blocks.length === 2, 'two job examples are documented');
-  const [preview, bind] = blocks;
+  expect(blocks.length === 2, `two job examples are documented (found ${blocks.length})`);
+  // Guarded rather than destructured straight away: when the count is wrong the
+  // interesting thing is the count, and reading it off a stack trace is worse
+  // than being told.
+  const [preview = {}, bind = {}] = blocks;
   const pSrc = readFileSync(ROOT + 'scripts/preview.mjs', 'utf8');
   const bSrc = readFileSync(ROOT + 'scripts/bind-csharp.mjs', 'utf8');
   Object.keys(preview).forEach((k) =>
@@ -41,6 +49,8 @@ section('the documented job examples actually run');
 </ui:UXML>`);
   writeFileSync(T + 'Main.uss', '#Panel { width: 200px; height: 80px; } #UseButton { height: 30px; }');
   const [preview, bind] = jsonBlocks();
+  if (!preview || !bind) { expect(false, 'the job examples are readable at all'); }
+  else {
 
   const p = { ...preview };
   delete p.assets;                      // the example points at a file we do not ship
@@ -57,6 +67,7 @@ section('the documented job examples actually run');
   try { execFileSync('node', [ROOT + 'scripts/bind-csharp.mjs', T + 'bind.json'], { stdio: 'pipe' }); }
   catch (e) { bCode = e.status; }
   expect(bCode === 0, 'the documented bind job runs clean');
+  }
 }
 
 section('the exit codes are what the table says');
@@ -253,6 +264,33 @@ section('no number is quoted without its unit');
   expect(suspicious.length === 0,
     'SKILL.md quotes no raw accuracy ratio: ' + suspicious.map((m) => m[0]).join(', '));
   expect(/docs\/accuracy\.md/.test(SKILL), 'it links the accuracy document instead');
+}
+
+{
+  // The bundle is a committed build artifact, and the failure it invites is a
+  // stale one: someone reaches for a newer core API in check.js and forgets to
+  // rebuild. Everything still loads, and the feature is simply absent at run
+  // time. So the artifact has to say which core it came from, and it has to
+  // actually contain what the code around it calls.
+  const bundle = readFileSync(ROOT + 'src/core.bundle.js', 'utf8');
+  const stamp = bundle.match(/uxml-preview (\d+\.\d+\.\d+)/);
+  expect(!!stamp, 'the bundle names the core version it was built from');
+  expect(/GENERATED FILE/.test(bundle) && /npm run build:core/.test(bundle),
+    'and says it is generated, and how to regenerate it');
+
+  const buildScript = readFileSync(ROOT + 'scripts/build-core-bundle.mjs', 'utf8');
+  const hinted = buildScript.match(/uxml-preview@(\d+\.\d+\.\d+)/);
+  expect(!!hinted && !!stamp && hinted[1] === stamp[1],
+    `the install hint in the build script matches the bundle: ${hinted && hinted[1]} vs ${stamp && stamp[1]}`);
+
+  // Named one at a time rather than through a list kept somewhere: a list would
+  // be a third place to forget.
+  for (const api of ['collectDependencies', 'expandTemplates', 'loadLayoutEngine', 'parse', 'render', 'serialize']) {
+    expect(bundle.includes(api + ':'), `the bundle exports ${api}, which the code calls`);
+  }
+
+  expect(bundle.split('\n').length > 100,
+    'and it is not minified onto a handful of lines, so a core bump is reviewable');
 }
 
 rmSync(T, { recursive: true, force: true });

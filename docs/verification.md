@@ -13,8 +13,8 @@ way proves nothing.
 | Suite | Guards |
 | --- | --- |
 | `conditions` | painting, the collapse channel, injected images, multi-sheet resolution |
-| `exitcodes` | 0 / 1 / 2 stay distinguishable, including a simulated missing `happy-dom` |
-| `binding` | determinism, name retirement, renames, the untouched logic file |
+| `exitcodes` | 0 / 1 / 2 stay distinguishable, including a simulated missing `happy-dom`; assembled screens, a mistyped `element-name`, a missing template, a cyclic graph, slots, package paths |
+| `binding` | determinism, name retirement, renames, the untouched logic file, a repeated name refused before anything is written |
 | `docs` | SKILL.md still describes the code it ships with |
 
 Notable mutations, and what would slip past without them:
@@ -27,6 +27,41 @@ Notable mutations, and what would slip past without them:
   raises no warning in any channel.
 - **always write the logic half** — hand-written C# disappears while all other
   assertions pass.
+- **render the parsed tree instead of the expanded one** — the screen is right,
+  every channel agrees, and the collapse and overflow checks silently skip every
+  node inside an instance because it has no label. The gate would pass a screen
+  it never looked at. Guarded by an instrument check of its own: a laid-out node
+  absent from the index is reported as a fault in the report, not as a finding.
+- **fold a nested reference against the raw parent URL** — the core hands back
+  `from` exactly as written, so at two levels deep `A.uxml` inside `Parts/B.uxml`
+  resolves to `A.uxml` instead of `Parts/A.uxml`, and a document already in hand
+  looks unresolved. One level hides it completely, and so does a two-level
+  fixture where the middle document is reached by a path that needs no folding —
+  the raw URL and the folded key are the same string there, and the mutation
+  passes. The fixture that proves this has to nest three deep.
+- **classify `template-slot-unsupported` or `package-path-not-searched` as an
+  ordinary problem** — the exit code goes to 1 on screens that are correct, and a
+  signal that is always on stops carrying anything.
+- **classify `duplicate-name-in-tree` as a problem** — every screen assembled
+  from a template used twice fails the gate, which is the exact category of file
+  this version exists to open.
+- **derive fields from a repeated name** — three fields all reach the first
+  element and the C# compiles; on the next run the contract, keyed by name,
+  collapses them onto one field and emits it three times, which does not compile
+  at all. Both were silent before.
+- **let a checkout carry CRLF** — `core.autocrlf=true` is the Windows default,
+  and without `* text=auto eol=lf` the clone no longer matches what was
+  committed. `tests/docs.mjs` parses SKILL.md with LF patterns, matched nothing,
+  and then died on `Object.keys(undefined)` — a TypeError, not a named failure.
+  Reproduced on an unmodified checkout, so it was the repo's to fix. Guarded
+  twice: the checkout is normalised, and the parser tolerates CRLF and reports a
+  count instead of destructuring into a crash.
+- **copy a directory with `fs.cpSync`** — on Windows, with a non-ASCII character
+  anywhere in either path, the process dies with STATUS_ACCESS_VIOLATION and
+  prints nothing at all. No exit code in the 0/1/2 contract, no stack, no line.
+  Found by two independent verifications on Node v22.17.0 under a Korean user
+  folder; spaces in the path are fine, so the trigger is the character set. The
+  harness copies with readdir + copyFile for that reason.
 - **drop the retirement report** — a removed element reads as a clean run.
 
 ## Human

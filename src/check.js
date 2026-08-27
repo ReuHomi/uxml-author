@@ -69,17 +69,51 @@
       throw new Error('panel size is required — % and stretch are all measured against it');
     }
 
-    var sheetsRequested = [];
-    var sheetsMissing = [];
-    var doc = core.parse(input.uxml, undefined, {
-      resolveImport: function (url, from) {
-        var key = resolveSheetUrl(url, from || null);
-        sheetsRequested.push(key);
-        if (Object.prototype.hasOwnProperty.call(sheets, key)) return sheets[key];
-        sheetsMissing.push(key);
-        return null;
-      },
-    });
+    // One hook serves both kinds of dependency, because the core resolves a
+    // `<ui:Template src>` through the same `resolveImport` it uses for a
+    // stylesheet. We cannot be told which kind is being asked for, so we look in
+    // both maps rather than guess from the extension — a miss carries the
+    // resolved key, which says what it was on its own.
+    var templates = input.templates || {};
+    var depsRequested = [];
+    var depsMissing = [];
+
+    // The core hands back `from` exactly as it received it — the raw `src`
+    // string written in the parent document, never a folded one. At one level
+    // those are the same and nothing shows. At two, `A.uxml` declared inside
+    // `Parts/B.uxml` arrives as resolveImport("A.uxml", "B.uxml") and folds to
+    // `A.uxml` instead of `Parts/A.uxml`, so a document already in hand looks
+    // unresolved. Remembering what each raw URL folded to is what makes the
+    // second level behave like the first.
+    var foldedOf = Object.create(null);
+    var ambiguous = [];
+    function resolveDep(url, from) {
+      var base = from ? (foldedOf[from] || from) : null;
+      var key = resolveSheetUrl(url, base);
+      if (Object.prototype.hasOwnProperty.call(foldedOf, url)) {
+        // One raw string standing for two documents (the same file name under
+        // two folders). Nothing here can tell them apart, so say so instead of
+        // silently letting the later one win.
+        if (foldedOf[url] !== key) ambiguous.push({ url: url, was: foldedOf[url], now: key });
+      } else {
+        foldedOf[url] = key;
+      }
+      depsRequested.push(key);
+      if (Object.prototype.hasOwnProperty.call(templates, key)) return templates[key];
+      if (Object.prototype.hasOwnProperty.call(sheets, key)) return sheets[key];
+      depsMissing.push(key);
+      return null;
+    }
+
+    var parsed = core.parse(input.uxml, undefined, { resolveImport: resolveDep });
+
+    // Expansion is a separate call and produces a DERIVED tree. Everything below
+    // must read that tree, not the parsed one: indexing the parsed tree would
+    // leave every node inside an instance unlabelled, and the collapse and
+    // overflow checks skip unlabelled nodes — the gate would pass a screen it
+    // never looked at. `parsed` stays untouched for anything that serializes.
+    var expansion = core.expandTemplates(parsed);
+    var doc = expansion.document;
 
     var labels = indexNodes(doc.root, new Map());
 
@@ -104,21 +138,52 @@
     // whenever a themed control is used at all. Counting it as a problem makes
     // the failure signal permanent, and a signal that is always on carries
     // nothing. It gets its own channel and never reaches the exit code.
-    var unsupported = [], missingAssets = [], versionDependent = [], other = [];
-    r.warnings.forEach(function (w) {
-      if (w.kind === 'unsupported-control') unsupported.push(w);
+    //
+    // Two of the template diagnostics belong in channels that already exist,
+    // and putting them in `other` would have been wrong in opposite directions:
+    //
+    //   template-slot-unsupported — content that is invisible here and present
+    //     in Unity. That is exactly what `unsupported` means; it is a trace, not
+    //     a defect in the document.
+    //   package-path-not-searched — a standing constraint of this renderer, true
+    //     on every run that touches such a path. `versionDependent` exists for
+    //     conditions that are always on, because a signal that never varies
+    //     carries nothing and would make the exit code permanently 1.
+    //
+    // Everything else template-related IS a defect the author can act on, so it
+    // stays in `other` and reaches the exit code.
+    //   duplicate-name-in-tree — the UNAVOIDABLE consequence of instantiating one
+    //     template more than once, and correct UXML. Failing on it would fail
+    //     every assembled screen, which is precisely the kind of file this
+    //     version exists to open. It is not a defect in the screen; it is a
+    //     constraint on the C# that can be written against it, so it gets its own
+    //     channel. `bind-csharp` refuses separately, where the question is asked.
+    //
+    var unsupported = [], missingAssets = [], versionDependent = [], repeatedNames = [], other = [];
+    var allWarnings = r.warnings.concat(expansion.warnings || []);
+    allWarnings.forEach(function (w) {
+      if (w.kind === 'unsupported-control' || w.kind === 'template-slot-unsupported') unsupported.push(w);
       else if (w.kind === 'asset-unresolved') missingAssets.push(w);
-      else if (w.kind === 'version-dependent') versionDependent.push(w);
+      else if (w.kind === 'version-dependent' || w.kind === 'package-path-not-searched') versionDependent.push(w);
+      else if (w.kind === 'duplicate-name-in-tree') repeatedNames.push(w);
       else other.push(w);
     });
 
     var excluded = new Set();
     unsupported.forEach(function (w) { if (w.node != null) excluded.add(w.node); });
 
-    var collapsed = [], overflow = [];
+    // Two different things used to share one `return` here, and only one of them
+    // is legitimate. A node with no `name` is genuinely not a contract surface.
+    // A node absent from `labels` altogether means the tree we indexed is not
+    // the tree that was laid out — the index would then be silently skipping
+    // whole regions while still reporting a pass. That is an instrument fault,
+    // not a finding, so it gets its own channel and is never merged with the
+    // unnamed case.
+    var collapsed = [], overflow = [], unindexed = [];
     r.boxes.forEach(function (box, id) {
       var info = labels.get(id);
-      if (!info || !info.name) return;       // unnamed nodes are not a contract surface
+      if (!info) { unindexed.push(id); return; }
+      if (!info.name) return;                // unnamed nodes are not a contract surface
       if (excluded.has(id)) return;
       if (box.width === 0 || box.height === 0) collapsed.push({ id: id, type: info.type, name: info.name, box: box });
       if (box.left + box.width > panel.width || box.top + box.height > panel.height) {
@@ -128,10 +193,19 @@
 
     // Painting is a fact apart from layout. Warnings, boxes and liveNodeCount
     // can all be right while the container is empty.
-    var texts = {};
+    // `texts` is keyed by name, so a repeated name loses every copy but the
+    // last. Silent before: the report would show one text and say nothing about
+    // the others. Repeated names are normal once a template is instantiated
+    // more than once, so this has to be visible rather than assumed away.
+    var texts = {}, textCollisions = [];
     r.elements.forEach(function (el, id) {
       var info = labels.get(id);
-      if (info && info.name) texts[info.name] = el.textContent;
+      if (!info || !info.name) return;
+      if (Object.prototype.hasOwnProperty.call(texts, info.name)) {
+        textCollisions.push(info.name);
+        return;                              // first one wins, like Q<T>() does
+      }
+      texts[info.name] = el.textContent;
     });
 
     var boxes = [];
@@ -147,17 +221,25 @@
         elementCount: r.elements.size,
         boxCount: r.boxes.size,
         texts: texts,
+        textCollisions: textCollisions,
       },
-      parseWarnings: doc.warnings || [],
+      parseWarnings: parsed.warnings || [],
       unsupported: unsupported,
       missingAssets: missingAssets,
       versionDependent: versionDependent,
+      repeatedNames: repeatedNames,
       other: other,
       collapsed: collapsed,
       overflow: overflow,
+      unindexed: unindexed,
       injected: injected,
-      sheetsRequested: sheetsRequested,
-      sheetsMissing: sheetsMissing,
+      // Kept under the old names: every consumer reads them, and a stylesheet
+      // is still what most of them are. `deps*` is the honest superset.
+      sheetsRequested: depsRequested,
+      sheetsMissing: depsMissing,
+      depsRequested: depsRequested,
+      depsMissing: depsMissing,
+      ambiguousDeps: ambiguous,
       rootId: doc.root.id,
       boxes: boxes,
       panel: panel,
