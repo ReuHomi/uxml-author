@@ -45,6 +45,10 @@ working directory holds an `Assets/` folder or existing `.uxml` files, they are
 probably running you inside a project — ask whether to write there, and where.
 Never write into someone's project without being told to.
 
+The scripts below live in this skill's own directory, not the project you're
+working in — resolve them from there, not from the current working directory.
+Installed as a plugin, `${CLAUDE_PLUGIN_ROOT}` is that directory.
+
 ## The loop
 
 1. **Read the structure.** From a description, a sketch, or existing files.
