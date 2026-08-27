@@ -46,6 +46,13 @@ Notable mutations, and what would slip past without them:
   element and the C# compiles; on the next run the contract, keyed by name,
   collapses them onto one field and emits it three times, which does not compile
   at all. Both were silent before.
+- **let a checkout carry CRLF** — `core.autocrlf=true` is the Windows default,
+  and without `* text=auto eol=lf` the clone no longer matches what was
+  committed. `tests/docs.mjs` parses SKILL.md with LF patterns, matched nothing,
+  and then died on `Object.keys(undefined)` — a TypeError, not a named failure.
+  Reproduced on an unmodified checkout, so it was the repo's to fix. Guarded
+  twice: the checkout is normalised, and the parser tolerates CRLF and reports a
+  count instead of destructuring into a crash.
 - **copy a directory with `fs.cpSync`** — on Windows, with a non-ASCII character
   anywhere in either path, the process dies with STATUS_ACCESS_VIOLATION and
   prints nothing at all. No exit code in the 0/1/2 contract, no stack, no line.

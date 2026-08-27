@@ -1,3 +1,13 @@
+# Every text file checks out with LF, on every machine. Without this line a
+# clone on a host with core.autocrlf=true (the Windows default) gets CRLF in
+# SKILL.md and the .mjs files, and the checkout no longer matches what was
+# committed. That is not cosmetic here: the tests parse SKILL.md with patterns
+# written for LF, and the preview page's byte-identity check compares committed
+# bytes. Found when tests/docs.mjs died on a Windows clone — and it reproduced
+# on an unmodified checkout, so it was the repo's to fix, not that machine's.
+# The rules below deliberately override this one; later rules win.
+* text=auto eol=lf
+
 # core.bundle.js is a minified build artefact with a base64 payload on one line,
 # and Windows clones default to autocrlf. Marking these binary keeps a checkout
 # byte-identical to what was committed, which the preview page's byte-identity
