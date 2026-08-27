@@ -34,8 +34,11 @@ Notable mutations, and what would slip past without them:
   absent from the index is reported as a fault in the report, not as a finding.
 - **fold a nested reference against the raw parent URL** — the core hands back
   `from` exactly as written, so at two levels deep `A.uxml` inside `Parts/B.uxml`
-  resolves to `A.uxml`, and a document already in hand is reported unresolved.
-  One level hides it completely; the cyclic case is what exposed it.
+  resolves to `A.uxml` instead of `Parts/A.uxml`, and a document already in hand
+  looks unresolved. One level hides it completely, and so does a two-level
+  fixture where the middle document is reached by a path that needs no folding —
+  the raw URL and the folded key are the same string there, and the mutation
+  passes. The fixture that proves this has to nest three deep.
 - **classify `template-slot-unsupported` or `package-path-not-searched` as an
   ordinary problem** — the exit code goes to 1 on screens that are correct, and a
   signal that is always on stops carrying anything.
@@ -59,9 +62,6 @@ Notable mutations, and what would slip past without them:
   Found by two independent verifications on Node v22.17.0 under a Korean user
   folder; spaces in the path are fine, so the trigger is the character set. The
   harness copies with readdir + copyFile for that reason.
-- **fold a nested reference against the raw parent URL** — see below; the fixture
-  that proves it has to nest three deep, because at two the raw URL and the
-  folded key are still the same string.
 - **drop the retirement report** — a removed element reads as a clean run.
 
 ## Human
