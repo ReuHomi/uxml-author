@@ -75,18 +75,75 @@ catch (e) { cannotRun('the layout engine (Yoga/WASM) failed to start: ' + e.mess
 // `<Style src>` is relative to the UXML, not to wherever the job file happens
 // to sit. The demo hid this because the two were the same folder.
 const sheetRoot = job.sheetRoot ? at(job.sheetRoot) : dirname(at(job.uxml));
+const uxmlRoot = dirname(at(job.uxml));
 const sheets = {};
 const sheetMisses = [];
+
+// A template `src` is relative to the UXML that declares it, not to the sheet
+// root, and a stylesheet reached through a template belongs to that template's
+// folder. Sheets and templates therefore cannot share one base directory.
+const templates = {};
+const templateMisses = [];
+
+function readSheet(key, baseDir) {
+  if (key in sheets) return sheets[key];
+  const file = job.sheets && job.sheets[key] ? at(job.sheets[key]) : join(baseDir, key);
+  if (!existsSync(file)) { sheetMisses.push({ key, file }); return null; }
+  sheets[key] = readFileSync(file, 'utf8');
+  return sheets[key];
+}
+
+// Template dependencies are a graph, and `collectDependencies` reports one hop.
+// Walking to a fixed point is the host's job: the core's resolver is synchronous,
+// so every document in the closure must already be in hand before the render.
+// MAX_ROUNDS is not a depth limit — the core caps nesting at 32 on its own — it
+// is the guarantee that a cyclic document cannot spin here instead of being
+// reported as a cycle by the party that can name the path.
+// Every key here is relative to the ENTRY document's folder, because that is
+// what the core produces: it resolves a nested reference against the URL of the
+// document holding it, and that URL is itself already entry-relative. Prefetching
+// under any other key stores the right bytes where the renderer will not look —
+// which surfaced as an `import-unresolved` for a template's own stylesheet, with
+// the file sitting in the map the whole time.
+const MAX_ROUNDS = 64;
+{
+  const pending = [{ source: uxml, fromKey: null }];
+  const seen = new Set();
+  let rounds = 0;
+  while (pending.length) {
+    if (++rounds > MAX_ROUNDS) {
+      cannotRun(`template dependencies did not settle after ${MAX_ROUNDS} documents`,
+        'A cycle should be reported by the renderer, which can name the path. Spinning here instead is a bug in the prefetch, not in your UXML.');
+    }
+    const { source, fromKey } = pending.shift();
+    let deps;
+    try { deps = core.collectDependencies(source); }
+    catch (e) { cannotRun('a template declaration could not be read: ' + e.message); }
+    for (const raw of deps) {
+      const key = check.resolveSheetUrl(raw, fromKey);
+      if (seen.has(key)) continue;           // one read per document, N expansions
+      seen.add(key);
+      const file = job.templates && job.templates[key] ? at(job.templates[key]) : join(uxmlRoot, key);
+      if (!existsSync(file)) { templateMisses.push({ key, file }); continue; }
+      const text = readFileSync(file, 'utf8');
+      templates[key] = text;
+      pending.push({ source: text, fromKey: key });
+    }
+  }
+}
+
+// Sheets: one parse pass over the entry document and over every template just
+// pulled in, because a template carries its own `<Style src>`. The template pass
+// hands its own key as `from`, so `../Styles/x.uss` inside `Parts/Slot.uxml`
+// lands under `Styles/x.uss` — the key the renderer will ask for.
 core.parse(uxml, undefined, {
-  resolveImport: (url, from) => {
-    const key = check.resolveSheetUrl(url, from || null);
-    if (key in sheets) return sheets[key];
-    const file = job.sheets && job.sheets[key] ? at(job.sheets[key]) : join(sheetRoot, key);
-    if (!existsSync(file)) { sheetMisses.push({ key, file }); return null; }
-    sheets[key] = readFileSync(file, 'utf8');
-    return sheets[key];
-  },
+  resolveImport: (url, from) => readSheet(check.resolveSheetUrl(url, from || null), sheetRoot),
 });
+for (const [key, text] of Object.entries(templates)) {
+  core.parse(text, undefined, {
+    resolveImport: (url, from) => readSheet(check.resolveSheetUrl(url, from || key), uxmlRoot),
+  });
+}
 
 // ── encode assets, with a cap that is never silent ──────────────────────────
 const MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp' };
@@ -111,7 +168,7 @@ for (const [uxmlPath, file] of Object.entries(job.assets || {})) {
 }
 
 // ── the gate ────────────────────────────────────────────────────────────────
-const input = { uxml, sheets, assets, panel: job.panel };
+const input = { uxml, sheets, templates, assets, panel: job.panel };
 let res;
 try { res = check.run(core, w.document.createElement('div'), input); }
 catch (e) { cannotRun('the render threw: ' + e.message); }
@@ -123,6 +180,13 @@ if (res.painted.childCount === 0) push('nothing was painted');
 if (res.painted.elementCount !== res.painted.boxCount) {
   push(`${res.painted.boxCount - res.painted.elementCount} laid-out node(s) were never painted`);
 }
+if (res.unindexed.length) {
+  push(`${res.unindexed.length} laid-out node(s) are absent from the indexed tree — the checks below skipped them, so this report is incomplete in a way it cannot describe`);
+}
+if (res.ambiguousDeps.length) {
+  res.ambiguousDeps.forEach((a) => push(`"${a.url}" names two different documents (${a.was} and ${a.now}); one of them was not loaded`));
+}
+if (templateMisses.length) push(`${templateMisses.length} template document(s) could not be read — the instances they fill are missing from the screen entirely, not merely unstyled`);
 if (sheetMisses.length) push(`${sheetMisses.length} stylesheet(s) could not be read — the coordinates below are wrong, not merely incomplete`);
 res.collapsed.forEach((c) => push(`<${c.type}> #${c.name} has no size and is invisible`));
 res.overflow.forEach((c) => push(`<${c.type}> #${c.name} runs outside the panel`));
@@ -133,10 +197,31 @@ res.dispose();
 
 // ── report ──────────────────────────────────────────────────────────────────
 const L = (s) => console.log(s);
-L(`panel ${job.panel.width}x${job.panel.height}   sheets ${Object.keys(sheets).length}   assets embedded ${Object.keys(assets).length}`);
+L(`panel ${job.panel.width}x${job.panel.height}   sheets ${Object.keys(sheets).length}   templates ${Object.keys(templates).length}   assets embedded ${Object.keys(assets).length}`);
 
 L(`\nnot drawn by this version (${res.unsupported.length}) — invisible here, visible in Unity; this list is the only trace`);
 res.unsupported.forEach((x) => L('  - ' + x.message));
+
+// Two sources, and neither alone is enough: the core reports a repeated name
+// only once expansion produced it, so a hand-written document that repeats one
+// is invisible to it. Our own painting sees both. Reporting on the union is what
+// keeps a repeat from going unmentioned in either direction.
+{
+  const collided = [...new Set(res.painted.textCollisions)];
+  if (res.repeatedNames.length || collided.length) {
+    // The wording used to claim a template even when there was none: a
+    // hand-written document that repeats a name got told this was "normal once
+    // a template is used twice", which is a different situation with a different
+    // fix. Say which one it is.
+    L(res.repeatedNames.length
+      ? `\nnames that address more than one element — unavoidable once a template is used twice, and not a fault in the screen`
+      : `\nnames that address more than one element — nothing here repeats a template, so these are repeats written by hand`);
+    res.repeatedNames.forEach((x) => L('  - ' + x.message));
+    if (collided.length) L(`  - ${collided.join(', ')} — the text reported below is the FIRST element's`);
+    L('  Q<T>() reaches only the first. bind-csharp refuses these names rather than');
+    L('  deriving fields that would all point at the same element.');
+  }
+}
 
 if (res.versionDependent.length) {
   L(`\nmeasured on Unity 6000.0.40f1 (${res.versionDependent.length}) — a standing condition, not a problem`);
@@ -168,7 +253,7 @@ const page = readFileSync(ROOT + 'src/page.html', 'utf8')
   .replace('"__INPUT__"', () => JSON.stringify({
     ...input,
     title: job.title || job.uxml,
-    meta: { sheetMisses, assetSkipped, injectedNote: res.injected },
+    meta: { sheetMisses, templateMisses, assetSkipped, injectedNote: res.injected },
   }));
 // The inlined copies must be byte-identical to their sources, and every block
 // must actually parse. A page that silently fails to run is worse than no page:
