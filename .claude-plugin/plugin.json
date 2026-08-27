@@ -2,7 +2,6 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "uxml-author",
   "displayName": "UXML Author",
-  "version": "0.1.0",
   "description": "Design Unity UI Toolkit screens and see the layout before Unity does. Produces .uxml, .uss, a C# scaffold and a self-contained HTML preview rendered by the same Yoga engine UI Toolkit uses.",
   "author": { "name": "ReuHomi", "url": "https://github.com/ReuHomi" },
   "homepage": "https://github.com/ReuHomi/uxml-author",
