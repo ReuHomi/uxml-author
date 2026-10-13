@@ -138,7 +138,7 @@ otherwise produce a screen that looks checked and is not the one asked about.
 Fix the job and run again.
 
 Never open `src/core.bundle.js`. It is a generated build artifact of about
-223 KB (3,703 lines) — not minified, but every identifier is mangled — and
+241 KB (4,054 lines) — not minified, but every identifier is mangled — and
 reading it will cost you the conversation for nothing.
 
 ## Exit codes

@@ -24,7 +24,7 @@
 // `npm ci` on plugin install, which would then pull esbuild's platform binaries
 // onto every user's machine for a script none of them run.
 //
-//   npm install --no-save esbuild uxml-preview@0.5.0
+//   npm install --no-save esbuild uxml-preview@0.5.1
 //
 import { build } from 'esbuild';
 import { writeFileSync, mkdtempSync, readFileSync } from 'node:fs';
