@@ -96,6 +96,33 @@ node scripts/bind-csharp.mjs bind.json
 ```
 `renames` is only for a rename the person actually asked for.
 
+**Checking a screen in a particular state.** Rules under `:hover`, `:active`,
+`:focus`, `:checked`, `:disabled` and the like never apply in a plain run. To
+judge the screen as it looks in one of those states, name it in the job:
+
+```json
+{
+  "uxml": "Inventory.uxml",
+  "panel": { "width": 1920, "height": 1080 },
+  "states": { "#UseButton": ["hover", "active"] },
+  "out": "preview-pressed.html"
+}
+```
+
+`states` maps a USS selector to the states the elements it matches are in.
+`activeStates` is a plain list of states every element is in at once, such as
+`["disabled"]`. Both are optional; leave them out and nothing changes. The
+names are Unity's own pseudo-classes — `hover`, `active`, `inactive`, `focus`,
+`disabled`, `enabled`, `checked` — and the list is always an array, even for
+one state. The report's second line and the top of the preview name the
+combination that was applied, so say it when you show the result.
+
+The run refuses (code 2) rather than guess when the request cannot be honoured:
+a value that is not an array, a name that is not a Unity state, a selector the
+renderer cannot use, or a selector that matches no element. Each of those would
+otherwise produce a screen that looks checked and is not the one asked about.
+Fix the job and run again.
+
 Never open `src/core.bundle.js`. It is a 166 KB minified build artifact and
 reading it will cost you the conversation for nothing.
 

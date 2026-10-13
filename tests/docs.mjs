@@ -28,15 +28,20 @@ function jsonBlocks() {
 section('the job files in the documentation are the job files the scripts read');
 {
   const blocks = jsonBlocks();
-  expect(blocks.length === 2, `two job examples are documented (found ${blocks.length})`);
+  expect(blocks.length === 3, `three job examples are documented (found ${blocks.length})`);
   // Guarded rather than destructured straight away: when the count is wrong the
   // interesting thing is the count, and reading it off a stack trace is worse
   // than being told.
-  const [preview = {}, bind = {}] = blocks;
+  const [preview = {}, bind = {}, withStates = {}] = blocks;
   const pSrc = readFileSync(ROOT + 'scripts/preview.mjs', 'utf8');
   const bSrc = readFileSync(ROOT + 'scripts/bind-csharp.mjs', 'utf8');
   Object.keys(preview).forEach((k) =>
     expect(pSrc.includes('job.' + k), `preview.mjs reads job.${k}`));
+  Object.keys(withStates).forEach((k) =>
+    expect(pSrc.includes('job.' + k), `preview.mjs reads job.${k} (states example)`));
+  // Named in prose rather than in an example, so checked by name.
+  expect(/`activeStates`/.test(SKILL) && pSrc.includes('job.activeStates'),
+    'activeStates is documented and preview.mjs reads job.activeStates');
   Object.keys(bind).forEach((k) =>
     expect(bSrc.includes('job.' + k), `bind-csharp.mjs reads job.${k}`));
 }
@@ -48,8 +53,8 @@ section('the documented job examples actually run');
   <ui:VisualElement name="Panel"><ui:Button name="UseButton" text="Use" /></ui:VisualElement>
 </ui:UXML>`);
   writeFileSync(T + 'Main.uss', '#Panel { width: 200px; height: 80px; } #UseButton { height: 30px; }');
-  const [preview, bind] = jsonBlocks();
-  if (!preview || !bind) { expect(false, 'the job examples are readable at all'); }
+  const [preview, bind, withStates] = jsonBlocks();
+  if (!preview || !bind || !withStates) { expect(false, 'the job examples are readable at all'); }
   else {
 
   const p = { ...preview };
@@ -59,6 +64,20 @@ section('the documented job examples actually run');
   try { execFileSync('node', [ROOT + 'scripts/preview.mjs', T + 'job.json'], { stdio: 'pipe' }); }
   catch (e) { pCode = e.status; }
   expect(pCode === 0, 'the documented preview job runs clean on a minimal UXML');
+
+  writeFileSync(T + 'states.json', JSON.stringify(withStates));
+  let sCode = 0;
+  try { execFileSync('node', [ROOT + 'scripts/preview.mjs', T + 'states.json'], { stdio: 'pipe' }); }
+  catch (e) { sCode = e.status; }
+  expect(sCode === 0, 'the documented states job runs clean too — its selector matches and its states are Unity\'s');
+
+  // The documented list of state names is the list the check enforces.
+  await import(pathToFileURL(ROOT + 'src/check.js').href);
+  const allowed = globalThis.UxmlCheck.UNITY_STATES;
+  const para = SKILL.slice(SKILL.indexOf("The\nnames are Unity's own pseudo-classes"));
+  const listed = [...para.slice(0, para.indexOf('\n\n')).matchAll(/`(\w+)`/g)].map((m) => m[1]);
+  expect(listed.length === allowed.length && listed.every((n) => allowed.includes(n)),
+    `the state names SKILL.md lists are exactly the ones accepted: ${listed.join(', ')}`);
 
   const b = { ...bind };
   delete b.renames;                     // renaming something that was never there is not a case

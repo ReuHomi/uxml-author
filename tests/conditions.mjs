@@ -353,6 +353,145 @@ const hiddenNames = (res) => names(res.hidden);
   res.dispose();
 }
 
+section('J — states asked for in the job are the states drawn');
+// The external report gave two USS lines; the document around them is ours.
+const UXML_USE = `<ui:UXML xmlns:ui="UnityEngine.UIElements"><Style src="U.uss" />
+  <ui:Template name="Slot" src="Slot.uxml" />
+  <ui:VisualElement name="Panel"><ui:Button name="Use" text="Use" /><ui:Instance template="Slot" name="SlotA" /></ui:VisualElement></ui:UXML>`;
+const USE_SHEETS = {
+  'U.uss': `#Panel { width: 380px; height: 280px; }
+#Use { width: 80px; }
+#Use:hover { width: 140px; }
+#Use:disabled { height: 50px; }
+#Panel[odd] { width: 1px; }`,
+};
+const useInput = (extra) => ({ uxml: UXML_USE, sheets: USE_SHEETS, templates: ZERO_TEMPLATES, panel: PANEL, ...extra });
+const boxOf = (res, n) => res.boxes.find((b) => b.name === n).box;
+const layout = (res) => JSON.stringify(res.boxes.map((b) => [b.name, b.box]));
+{
+  const C = loadCheck();
+  const plain = C.run(core, stage(), useInput({}));
+  expect(boxOf(plain, 'Use').width === 80, `#Use is 80px with no states (got ${boxOf(plain, 'Use').width})`);
+  expect(C.describeStates(plain.applied) === 'states: none applied (the default)', 'and the report says no states were applied');
+  const hover = C.run(core, stage(), useInput({ states: { '#Use': ['hover'] } }));
+  expect(boxOf(hover, 'Use').width === 140, `states {"#Use": ["hover"]} → 140px (got ${boxOf(hover, 'Use').width})`);
+  expect(C.describeStates(hover.applied) === 'states: #Use :hover', 'and the applied combination is named: ' + C.describeStates(hover.applied));
+  const both = C.run(core, stage(), useInput({ states: { '#Use': ['hover', 'disabled'] } }));
+  const b = boxOf(both, 'Use');
+  expect(b.width === 140 && b.height === 50, `hover and disabled together → 140x50 (got ${b.width}x${b.height})`);
+  const split = C.run(core, stage(), useInput({ states: { '#Use': ['hover'] }, activeStates: ['disabled'] }));
+  const sb = boxOf(split, 'Use');
+  expect(sb.width === 140 && sb.height === 50, `hover by key, disabled on every element → 140x50 (got ${sb.width}x${sb.height})`);
+  expect(C.describeStates(split.applied) === 'states: #Use :hover   every element :disabled', 'and both parts are named');
+  const empty = C.run(core, stage(), useInput({ states: {}, activeStates: [] }));
+  expect(layout(empty) === layout(plain), 'explicitly empty states draw exactly what omitted states draw');
+  [plain, hover, both, split, empty].forEach((r) => r.dispose());
+
+  // "Omitted" must mean the behaviour before this input existed, measured
+  // against a copy of the check with the old hardcoded options put back.
+  const Old = loadCheck((x) => x.replace('var cascadeOpts = { activeStates: st.activeStates, states: st.states };',
+    'var cascadeOpts = { activeStates: new Set(), states: {} };'));
+  const old = Old.run(core, stage(), useInput({}));
+  const now = loadCheck().run(core, stage(), useInput({}));
+  expect(layout(old) === layout(now) &&
+    JSON.stringify(old.other) === JSON.stringify(now.other), 'omitted states: same boxes and warnings as before');
+  old.dispose(); now.dispose();
+}
+{
+  // States reach the hidden judgement through the same options as the render.
+  const C = loadCheck();
+  const res = C.run(core, stage(), { uxml: UXML_ZERO.replace('__TOGGLE__', 'none'), sheets: ZERO_SHEETS,
+    templates: ZERO_TEMPLATES, panel: PANEL, states: { '#Use': ['hover'] } });
+  const use = res.hidden.find((h) => h.name === 'Use');
+  expect(use && /"#Use:hover" in Z\.uss/.test(use.origin), 'a pseudo-state rule hides #Use once the state is applied: ' + (use && use.origin));
+  expect(res.cascadeMismatch.length === 0, 'and both cascades saw the state');
+  res.dispose();
+}
+{
+  // The probe runs on its own parse. Nothing it does may reach what is judged.
+  const C = loadCheck();
+  const a = C.run(core, stage(), useInput({}));
+  const b = C.run(core, stage(), useInput({ states: { '#Panel': ['focus'], '#SlotRoot': ['hover'] } }));
+  expect(layout(a) === layout(b), 'a state no rule uses leaves every box where it was');
+  expect(JSON.stringify(a.other) === JSON.stringify(b.other) &&
+    JSON.stringify(a.versionDependent) === JSON.stringify(b.versionDependent), 'and every warning as it was');
+  expect(!b.depsRequested.some((d) => /probe/.test(d)) && b.depsMissing.length === a.depsMissing.length,
+    'and the probe sheet is in no dependency list');
+  expect(b.applied.states['#SlotRoot'], 'a key matching an element inside a template instance is accepted');
+  a.dispose(); b.dispose();
+}
+const refusal = (C, extra) => C.checkStates(core, useInput(extra)).errors.join(' | ');
+{
+  const C = loadCheck();
+  const cases = [
+    [{ states: { '#Use': 'hover' } }, /must be an array.*the string "hover"/, 'a string where an array belongs'],
+    [{ activeStates: 'hover' }, /activeStates must be an array.*the string "hover"/, 'activeStates as a string'],
+    [{ states: ['#Use'] }, /states must be an object/, 'states as an array'],
+    [{ states: { '#Use': [] } }, null, 'an empty list is accepted, and applies nothing'],
+    [{ states: { '#Use': ['hovr'] } }, /"hovr", which is not a Unity state/, 'a mistyped state name'],
+    [{ states: { '#Use': ['selected'] } }, /"selected", which is not a Unity state/, ':selected, which USS does not support'],
+    [{ activeStates: ['root'] }, /"root", which is not a Unity state/, ':root, which is not a state'],
+    [{ states: { '#Nope': ['hover'] } }, /"#Nope" matches no element/, 'a key that matches no element'],
+    [{ states: { '#Use[x]': ['hover'] } }, /"#Use\[x\]" is not a usable USS selector/, 'a key the core cannot use as a selector'],
+    [{ states: { '#Use { x': ['hover'] } }, /is not a selector/, 'a key that would break out of a rule'],
+  ];
+  cases.forEach(([extra, re, what]) => {
+    const e = refusal(C, extra);
+    expect(re ? re.test(e) : e === '', `${what} → ${re ? 'refused' : 'accepted'}${e ? ': ' + e : ''}`);
+  });
+  let threw = '';
+  try { C.run(core, stage(), useInput({ states: { '#Nope': ['hover'] } })); } catch (e) { threw = e.message; }
+  expect(/states refused/.test(threw), 'run() itself refuses, so the page cannot draw an unasked-for screen');
+  const own = C.run(core, stage(), useInput({}));
+  expect(own.other.some((w) => w.kind === 'unsupported-selector'),
+    "the document's own unsupported selector keeps its old channel");
+  own.dispose();
+}
+// mutations
+{
+  const C = loadCheck((x) => x.replace('var cascadeOpts = { activeStates: st.activeStates, states: st.states };',
+    'var cascadeOpts = { activeStates: new Set(), states: {} };'));
+  const res = C.run(core, stage(), useInput({ states: { '#Use': ['hover'] } }));
+  expect(boxOf(res, 'Use').width === 80, 'mutation (states hardcoded empty again) → #Use stays 80px, so the 140px case catches it');
+  res.dispose();
+}
+{
+  // Without the check a string is iterated as the core would iterate it.
+  const C = loadCheck((x) => x.replace('    if (!Array.isArray(value)) {', '    value = Array.from(value);\n    if (false) {'));
+  const e = refusal(C, { states: { '#Use': 'hover' } });
+  expect(!/must be an array/.test(e),
+    'mutation (no array check) → the string is split into letters and the refusal no longer says why: ' + e);
+}
+{
+  const C = loadCheck((x) => x.replace("typeof n !== 'string' || UNITY_STATES.indexOf(n) === -1", "typeof n !== 'string'"));
+  expect(refusal(C, { states: { '#Use': ['hovr'] } }) === '', 'mutation (no allow-list) → a mistyped state is accepted');
+}
+{
+  const C = loadCheck((x) => x.replace("        else if (!hit.has(PROBE_PROP + i)) errors.push(", "        else if (false) errors.push("));
+  expect(refusal(C, { states: { '#Nope': ['hover'] } }) === '', 'mutation (no match check) → a key matching nothing is accepted');
+}
+{
+  const C = loadCheck((x) => x.replace("if (w.kind !== 'unsupported-selector' || w.at !== undefined) return;", 'return;'));
+  const e = refusal(C, { states: { '#Use[x]': ['hover'] } });
+  expect(!/not a usable USS selector/.test(e), 'mutation (core refusal not read) → the unusable key is misdescribed: ' + e);
+}
+{
+  const C = loadCheck((x) => x.replace("if (st.errors.length) throw new Error(", "if (false) throw new Error("));
+  const res = C.run(core, stage(), useInput({ states: { '#Use[x]': ['hover'] } }));
+  expect(res.other.some((w) => /states key/.test(w.message)),
+    "mutation (run() does not refuse) → the job's bad key lands among the document's own warnings");
+  res.dispose();
+}
+{
+  const C = loadCheck((x) => x.replace("        var extra = {}; extra[PROBE_SHEET] = probe;",
+    "        var extra = {}; extra[PROBE_SHEET] = probe; input.sheets[PROBE_SHEET] = probe; input.uxml = String(input.uxml).replace(ROOT_OPEN, function (m) { return m + '<Style src=\"' + PROBE_SHEET + '\" />'; });"));
+  const inp = useInput({ states: { '#Panel': ['focus'] } });
+  inp.sheets = { ...USE_SHEETS };
+  const res = C.run(core, stage(), inp);
+  expect(res.depsRequested.some((d) => /probe/.test(d)), 'mutation (probe leaks into the real parse) → the isolation case catches it');
+  res.dispose();
+}
+
 section('H — no silent default panel size');
 {
   const C = loadCheck();

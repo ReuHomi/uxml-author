@@ -124,6 +124,35 @@ console.log('\nhidden is reported, never counted');
     'and the page does not pass it either: ' + pm.verdict);
 }
 
+console.log('\nstates come from the job, and a state that cannot be applied is not a judgement');
+{
+  writeFileSync(TMP + 'Styles/U.uss', '#Panel { width: 300px; height: 200px; }\n#Use { width: 80px; }\n#Use:hover { width: 140px; }');
+  writeFileSync(TMP + 'Use.uxml', `<ui:UXML xmlns:ui="UnityEngine.UIElements"><Style src="Styles/U.uss" />
+    <ui:VisualElement name="Panel"><ui:Button name="Use" text="Use" /></ui:VisualElement></ui:UXML>`);
+  const base = { uxml: 'Use.uxml', panel: { width: 400, height: 300 } };
+  const ok = runJob(job('states', { ...base, states: { '#Use': ['hover'] }, activeStates: ['disabled'] }));
+  expect(ok.code === 0, `a job with states runs → 0 (got ${ok.code})`);
+  const line = ok.out.split('\n')[1];
+  expect(line === 'states: #Use :hover   every element :disabled', 'the second line of the report names them: ' + line);
+  const pg = pageOf('states');
+  expect(pg.applied === line, 'and the page shows the same line: ' + pg.applied);
+  const none = runJob(job('nostates', base));
+  expect(none.code === 0 && none.out.split('\n')[1] === 'states: none applied (the default)',
+    'omitted, the report says so and nothing else changes');
+
+  const refused = [
+    [{ states: { '#Use': 'hover' } }, /must be an array.*the string "hover"/, 'a string where an array belongs'],
+    [{ activeStates: { hover: true } }, /activeStates must be an array/, 'activeStates not an array'],
+    [{ states: { '#Nope': ['hover'] } }, /"#Nope" matches no element/, 'a key matching nothing'],
+    [{ states: { '#Use[x]': ['hover'] } }, /"#Use\[x\]" is not a usable USS selector/, 'a key the core refuses as a selector'],
+    [{ states: { '#Use': ['pressed'] } }, /"pressed", which is not a Unity state/, 'a state Unity does not have'],
+  ];
+  refused.forEach(([extra, re, what], i) => {
+    const r = runJob(job('refuse' + i, { ...base, ...extra }));
+    expect(r.code === 2 && re.test(r.out), `${what} → 2, and the message says which and why (got ${r.code})`);
+  });
+}
+
 console.log('\nG — the cap is never silent');
 {
   const p = job('cap', {

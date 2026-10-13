@@ -53,6 +53,7 @@
   header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
   h1 { font-size: 17px; margin: 0 0 3px; font-weight: 600; letter-spacing: -.015em; }
   .sub { color: var(--mute); margin: 0 0 24px; font-size: 12.5px; }
+  #applied { margin-top: -18px; color: var(--slate); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
   .label {
     font-size: 10.5px; font-weight: 600; letter-spacing: .08em;
     text-transform: uppercase; color: var(--mute); margin: 0 0 12px;
@@ -120,6 +121,7 @@
   <div>
     <h1 id="h1">UXML preview</h1>
     <p class="sub">Everything needed to judge this is in this one file. It loads nothing from anywhere.</p>
+    <p class="sub" id="applied"></p>
   </div>
   <button id="theme" type="button" aria-pressed="false">Dark</button>
 </header>
@@ -204,6 +206,7 @@
     var res = globalThis.UxmlCheck.run(core, stage, UXML_INPUT);
 
     if (UXML_INPUT.title) document.getElementById('h1').textContent = UXML_INPUT.title;
+    document.getElementById('applied').textContent = globalThis.UxmlCheck.describeStates(res.applied);
     document.getElementById('src-uxml').textContent = UXML_INPUT.uxml;
     document.getElementById('src-uss').textContent = Object.keys(UXML_INPUT.sheets)
       .map(function (k) { return '/* ' + k + ' */\n' + UXML_INPUT.sheets[k]; }).join('\n\n');

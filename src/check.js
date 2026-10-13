@@ -76,6 +76,168 @@
   // collapse the author wrote, so it must not be explained away as "emptied".
   var EXPLICIT_ZERO = /^-?0+(\.0+)?(px|%)?$/;
 
+  // One hook serves both kinds of dependency, because the core resolves a
+  // `<ui:Template src>` through the same `resolveImport` it uses for a
+  // stylesheet. We cannot be told which kind is being asked for, so we look in
+  // both maps rather than guess from the extension — a miss carries the
+  // resolved key, which says what it was on its own.
+  //
+  // The core hands back `from` exactly as it received it — the raw `src`
+  // string written in the parent document, never a folded one. At one level
+  // those are the same and nothing shows. At two, `A.uxml` declared inside
+  // `Parts/B.uxml` arrives as resolveImport("A.uxml", "B.uxml") and folds to
+  // `A.uxml` instead of `Parts/A.uxml`, so a document already in hand looks
+  // unresolved. Remembering what each raw URL folded to is what makes the
+  // second level behave like the first.
+  //
+  // A factory, so that the state probe below gets bookkeeping of its own and
+  // can never leave its sheet in the lists the report reads.
+  function makeResolver(sheets, templates, extra) {
+    var requested = [], missing = [], ambiguous = [];
+    var foldedOf = Object.create(null);
+    function resolve(url, from) {
+      if (extra && !from && Object.prototype.hasOwnProperty.call(extra, url)) return extra[url];
+      var base = from ? (foldedOf[from] || from) : null;
+      var key = resolveSheetUrl(url, base);
+      if (Object.prototype.hasOwnProperty.call(foldedOf, url)) {
+        // One raw string standing for two documents (the same file name under
+        // two folders). Nothing here can tell them apart, so say so instead of
+        // silently letting the later one win.
+        if (foldedOf[url] !== key) ambiguous.push({ url: url, was: foldedOf[url], now: key });
+      } else {
+        foldedOf[url] = key;
+      }
+      requested.push(key);
+      if (Object.prototype.hasOwnProperty.call(templates, key)) return templates[key];
+      if (Object.prototype.hasOwnProperty.call(sheets, key)) return sheets[key];
+      missing.push(key);
+      return null;
+    }
+    return { resolve: resolve, requested: requested, missing: missing, ambiguous: ambiguous };
+  }
+
+  // The states a Unity element can be in, as USS pseudo-classes.
+  // Source: Unity Manual, "USS selectors: Pseudo-classes"
+  //   https://docs.unity3d.com/Manual/UIE-USS-Selectors-Pseudo-Classes.html
+  // `:root` is left out because it names a place in the tree, not a state —
+  // the core matches it structurally and ignores it in a state list. `:selected`
+  // is left out because that page says USS does not support it. Anything else
+  // is a name Unity will never put on an element, so a rule written for it can
+  // never match there, and a preview that applied it would show a screen that
+  // cannot exist.
+  var UNITY_STATES = ['hover', 'active', 'inactive', 'focus', 'disabled', 'enabled', 'checked'];
+  var PROBE_SHEET = '__uxml-author-state-probe__.uss';
+  var PROBE_PROP = '--uxml-author-state-probe-';
+  var ROOT_OPEN = /<([A-Za-z_][\w.-]*:)?UXML\b[^>]*>/;
+
+  function stateList(value, where, errors) {
+    if (!Array.isArray(value)) {
+      // A string is iterable, and the core would quietly apply "h", "o", "v",
+      // "e", "r" — none of which matches anything. Refused by name for that reason.
+      errors.push(where + ' must be an array of state names, got ' +
+        (typeof value === 'string' ? 'the string ' + JSON.stringify(value) : JSON.stringify(value)));
+      return null;
+    }
+    var ok = true;
+    value.forEach(function (n) {
+      if (typeof n !== 'string' || UNITY_STATES.indexOf(n) === -1) {
+        errors.push(where + ' names ' + JSON.stringify(n) + ', which is not a Unity state; use one of ' +
+          UNITY_STATES.join(', '));
+        ok = false;
+      }
+    });
+    return ok ? value.slice() : null;
+  }
+
+  /**
+   * Purpose: decide whether the states a caller asked for can be applied, and
+   *          turn them into what the core takes.
+   * Ensures: `errors` is empty, or the render must not happen — the screen it
+   *          would judge is not the one asked about. Every refusal names the
+   *          key or value and why.
+   *          A states key must match at least one element. That is asked of
+   *          the core's own selector matching, through a probe stylesheet in a
+   *          SEPARATELY parsed copy of the document: the probe never reaches
+   *          the render, the boxes, the warnings or the dependency lists.
+   */
+  function checkStates(core, input) {
+    var errors = [];
+    var rawStates = input.states === undefined ? {} : input.states;
+    var rawActive = input.activeStates === undefined ? [] : input.activeStates;
+    var states = {};
+    if (rawStates === null || typeof rawStates !== 'object' || Array.isArray(rawStates)) {
+      errors.push('states must be an object mapping a USS selector to an array of state names, got ' +
+        JSON.stringify(rawStates));
+    } else {
+      Object.keys(rawStates).forEach(function (key) {
+        if (!key.trim() || /[{};]/.test(key)) {
+          errors.push('states key ' + JSON.stringify(key) + ' is not a selector');
+          return;
+        }
+        var list = stateList(rawStates[key], 'states[' + JSON.stringify(key) + ']', errors);
+        if (list) states[key] = list;
+      });
+    }
+    var active = stateList(rawActive, 'activeStates', errors) || [];
+    var activeSet = new Set(active);
+
+    var keys = Object.keys(states);
+    if (!errors.length && keys.length) {
+      var parseWith = function (text, extra) {
+        var res = makeResolver(input.sheets || {}, input.templates || {}, extra);
+        return core.expandTemplates(core.parse(text, undefined, { resolveImport: res.resolve })).document;
+      };
+      // First, which keys the core itself refuses as selectors. Its warning for
+      // one carries no `at`: it comes from the job, not from a sheet. A
+      // document's own unsupported selector always has one, and keeps its old
+      // channel. A refused key is left out of the probe below, where its text
+      // could otherwise spoil the rules around it.
+      var refused = new Set();
+      core.resolveStyles(parseWith(String(input.uxml), null), { activeStates: activeSet, states: states })
+        .warnings.forEach(function (w) {
+          if (w.kind !== 'unsupported-selector' || w.at !== undefined) return;
+          keys.forEach(function (k) {
+            if (w.message.indexOf('states key "' + k + '"') === 0) refused.add(k);
+          });
+        });
+      var usable = keys.filter(function (k) { return !refused.has(k); });
+      var hit = new Set();
+      if (usable.length) {
+        var probe = usable.map(function (k) { return k + ' { ' + PROBE_PROP + keys.indexOf(k) + ': 1; }'; }).join('\n');
+        var extra = {}; extra[PROBE_SHEET] = probe;
+        var text = String(input.uxml).replace(ROOT_OPEN, function (m) {
+          return /\/>$/.test(m) ? m : m + '<Style src="' + PROBE_SHEET + '" />';
+        });
+        // Only the global states, as the core uses when it matches a states key.
+        core.resolveStyles(parseWith(text, extra), { activeStates: activeSet, states: {} }).styles.forEach(function (m) {
+          m.forEach(function (v, prop) {
+            if (prop.indexOf(PROBE_PROP) === 0 && v.origin && v.origin.kind === 'rule') hit.add(prop);
+          });
+        });
+      }
+      keys.forEach(function (k, i) {
+        if (refused.has(k)) errors.push('states key ' + JSON.stringify(k) + ' is not a usable USS selector');
+        else if (!hit.has(PROBE_PROP + i)) errors.push('states key ' + JSON.stringify(k) + ' matches no element in the document');
+      });
+    }
+
+    return {
+      errors: errors,
+      states: states,
+      activeStates: activeSet,
+      applied: { states: states, activeStates: active },
+    };
+  }
+
+  /** One wording for both consumers, so the report and the page name the same thing. */
+  function describeStates(applied) {
+    var keys = Object.keys(applied.states);
+    if (!keys.length && !applied.activeStates.length) return 'states: none applied (the default)';
+    var parts = keys.map(function (k) { return k + ' :' + applied.states[k].join(':'); });
+    if (applied.activeStates.length) parts.push('every element :' + applied.activeStates.join(':'));
+    return 'states: ' + parts.join('   ');
+  }
+
   /**
    * Purpose: one render, turned into the channels a human and a model read.
    *
@@ -104,41 +266,15 @@
       throw new Error('panel size is required — % and stretch are all measured against it');
     }
 
-    // One hook serves both kinds of dependency, because the core resolves a
-    // `<ui:Template src>` through the same `resolveImport` it uses for a
-    // stylesheet. We cannot be told which kind is being asked for, so we look in
-    // both maps rather than guess from the extension — a miss carries the
-    // resolved key, which says what it was on its own.
-    var templates = input.templates || {};
-    var depsRequested = [];
-    var depsMissing = [];
+    var resolver = makeResolver(input.sheets || {}, input.templates || {}, null);
+    var resolveDep = resolver.resolve;
+    var depsRequested = resolver.requested, depsMissing = resolver.missing, ambiguous = resolver.ambiguous;
 
-    // The core hands back `from` exactly as it received it — the raw `src`
-    // string written in the parent document, never a folded one. At one level
-    // those are the same and nothing shows. At two, `A.uxml` declared inside
-    // `Parts/B.uxml` arrives as resolveImport("A.uxml", "B.uxml") and folds to
-    // `A.uxml` instead of `Parts/A.uxml`, so a document already in hand looks
-    // unresolved. Remembering what each raw URL folded to is what makes the
-    // second level behave like the first.
-    var foldedOf = Object.create(null);
-    var ambiguous = [];
-    function resolveDep(url, from) {
-      var base = from ? (foldedOf[from] || from) : null;
-      var key = resolveSheetUrl(url, base);
-      if (Object.prototype.hasOwnProperty.call(foldedOf, url)) {
-        // One raw string standing for two documents (the same file name under
-        // two folders). Nothing here can tell them apart, so say so instead of
-        // silently letting the later one win.
-        if (foldedOf[url] !== key) ambiguous.push({ url: url, was: foldedOf[url], now: key });
-      } else {
-        foldedOf[url] = key;
-      }
-      depsRequested.push(key);
-      if (Object.prototype.hasOwnProperty.call(templates, key)) return templates[key];
-      if (Object.prototype.hasOwnProperty.call(sheets, key)) return sheets[key];
-      depsMissing.push(key);
-      return null;
-    }
+    // Refused before anything is drawn: a state the caller asked for that
+    // cannot be applied means the screen judged would not be the one asked
+    // about. The gate turns this into "did not run", never into a finding.
+    var st = checkStates(core, input);
+    if (st.errors.length) throw new Error('states refused — ' + st.errors.join('; '));
 
     var parsed = core.parse(input.uxml, undefined, { resolveImport: resolveDep });
 
@@ -157,7 +293,7 @@
     // `resolveStyles` separately — and the two only describe the same screen
     // if they are given the same states. Sharing the object is what keeps
     // them from drifting; `cascadeMismatch` below is what catches it if they do.
-    var cascadeOpts = { activeStates: new Set(), states: {} };
+    var cascadeOpts = { activeStates: st.activeStates, states: st.states };
 
     var injected = [];
     var r = core.render(doc, container, {
@@ -353,11 +489,15 @@
       depsRequested: depsRequested,
       depsMissing: depsMissing,
       ambiguousDeps: ambiguous,
+      applied: st.applied,
       rootId: doc.root.id,
       boxes: boxes,
       panel: panel,
     };
   }
 
-  globalThis.UxmlCheck = { run: run, resolveSheetUrl: resolveSheetUrl };
+  globalThis.UxmlCheck = {
+    run: run, resolveSheetUrl: resolveSheetUrl,
+    checkStates: checkStates, describeStates: describeStates, UNITY_STATES: UNITY_STATES,
+  };
 })();

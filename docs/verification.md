@@ -27,6 +27,12 @@ Notable mutations, and what would slip past without them:
   pseudo-state hides the element on screen while the report calls it collapsed.
   The class case fails; so does handing the style judgement different states
   from the render, which the cascade-agreement check catches.
+- **let a states value be a string** — the core iterates it letter by letter and
+  applies nothing, so a job asking for `"hover"` checks the plain screen and
+  says it passed. Refused by name; the mutation shows the refusal losing its
+  reason.
+- **skip the match check on a states key** — a selector that names no element
+  is applied to nothing, and the run looks like a check of the state it named.
 - **exempt `Image` from the collapse check** — a sizeless image, once supplied,
   raises no warning in any channel.
 - **always write the logic half** — hand-written C# disappears while all other

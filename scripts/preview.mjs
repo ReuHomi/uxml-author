@@ -6,7 +6,8 @@
 // EXIT CODE IS THE CONTRACT:
 //   0  gate ran, everything passed
 //   1  gate ran, something failed — collapse, overflow, unsupported, bad sheet
-//   2  GATE DID NOT RUN — no judgement was made about this output
+//   2  GATE DID NOT RUN — no judgement was made about this output, or not under
+//      the conditions the job asked for (a state that cannot be applied)
 //
 // 1 and 2 must never be merged. "checked and found a problem" and "never
 // checked" look identical to a caller that only tests for zero, and the second
@@ -167,8 +168,26 @@ for (const [uxmlPath, file] of Object.entries(job.assets || {})) {
   assets[uxmlPath] = `data:${MIME[ext] || 'application/octet-stream'};base64,${buf.toString('base64')}`;
 }
 
+// ── states ──────────────────────────────────────────────────────────────────
+// Judged in check.js, where the page judges them too. A state that cannot be
+// applied means the screen we would check is not the one asked about, so the
+// answer is "did not run", not a finding about the document.
+const stateInput = { uxml, sheets, templates, states: job.states, activeStates: job.activeStates };
+{
+  let st;
+  try { st = check.checkStates(core, stateInput); }
+  catch (e) { cannotRun('the requested states could not be checked: ' + e.message); }
+  if (st.errors.length) {
+    cannotRun('the requested states cannot be applied, so this is not the screen asked about:\n  - ' +
+      st.errors.join('\n  - '));
+  }
+}
+
 // ── the gate ────────────────────────────────────────────────────────────────
-const input = { uxml, sheets, templates, assets, panel: job.panel };
+// `states` and `activeStates` travel as plain JSON on the input, so the page
+// inlines exactly what was checked here and converts it the same way.
+const input = { uxml, sheets, templates, assets, panel: job.panel,
+                states: stateInput.states, activeStates: stateInput.activeStates };
 let res;
 try { res = check.run(core, w.document.createElement('div'), input); }
 catch (e) { cannotRun('the render threw: ' + e.message); }
@@ -201,6 +220,7 @@ res.dispose();
 // ── report ──────────────────────────────────────────────────────────────────
 const L = (s) => console.log(s);
 L(`panel ${job.panel.width}x${job.panel.height}   sheets ${Object.keys(sheets).length}   templates ${Object.keys(templates).length}   assets embedded ${Object.keys(assets).length}`);
+L(check.describeStates(res.applied));
 
 L(`\nnot drawn by this version (${res.unsupported.length}) — invisible here, visible in Unity; this list is the only trace`);
 res.unsupported.forEach((x) => L('  - ' + x.message));
