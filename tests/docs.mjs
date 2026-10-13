@@ -321,6 +321,16 @@ section('no number is quoted without its unit');
     expect(bundle.includes(api + ':'), `the bundle exports ${api}, which the code calls`);
   }
 
+  // SKILL.md tells the model how big the file it must not open is. A stale
+  // figure is how "166 KB minified" outlived the switch to an unminified build.
+  const said = SKILL.match(/build artifact of about\s+(\d+) KB \(([\d,]+) lines\)/);
+  const kb = bundle.length / 1024;
+  const lines = (bundle.match(/\n/g) || []).length;          // as `wc -l` counts
+  expect(!!said && Math.abs(Number(said[1]) - kb) <= kb * 0.05 &&
+         Number(said[2].replace(/,/g, '')) === lines,
+    `SKILL.md gives the bundle's real size: says ${said && said[1]} KB / ${said && said[2]} lines, is ${kb.toFixed(0)} KB / ${lines}`);
+  expect(!/minified build artifact/.test(SKILL), 'and does not call it minified');
+
   expect(bundle.split('\n').length > 100,
     'and it is not minified onto a handful of lines, so a core bump is reviewable');
 }

@@ -131,7 +131,8 @@ renderer cannot use, or a selector that matches no element. Each of those would
 otherwise produce a screen that looks checked and is not the one asked about.
 Fix the job and run again.
 
-Never open `src/core.bundle.js`. It is a 166 KB minified build artifact and
+Never open `src/core.bundle.js`. It is a generated build artifact of about
+223 KB (3,703 lines) — not minified, but every identifier is mangled — and
 reading it will cost you the conversation for nothing.
 
 ## Exit codes
