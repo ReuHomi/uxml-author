@@ -32,6 +32,10 @@ Read these first if anything acts on the exit code of `scripts/preview.mjs`.
   not on disk means the job points at nothing, like a missing UXML; it is no
   longer counted as a problem with the screen. The run stops before rendering
   and lists every missing file at once.
+- **`renames` in a bind job must be a map of names.** A string, an array,
+  `null` or a number, or an entry whose new name is not a non-empty string,
+  now stops `bind-csharp.mjs` with exit 2 and says which. Before, a string was
+  split into one "rename" per letter and recorded in the contract.
 - **Some screens that used to fail now pass, and the other way round.**
   - Elements hidden by `display: none` no longer exit 1 (see below).
   - Images between the old caps (512 KB per file, 2 MB in total) and the new

@@ -67,6 +67,23 @@ const base = dirname(resolve(jobPath));
 const at = (p) => resolve(base, p);
 
 if (!job.uxml || !existsSync(at(job.uxml))) cannotRun('no UXML at ' + job.uxml);
+
+// renames reach Object.entries, which takes anything: a string becomes one
+// "rename" per letter, an array one per index, and the contract records them
+// as intended changes. Refused here, by name, before anything is read.
+if (job.renames !== undefined) {
+  const r = job.renames;
+  if (r === null || typeof r !== 'object' || Array.isArray(r)) {
+    const got = r === null ? 'null' : Array.isArray(r) ? 'an array ' + JSON.stringify(r)
+      : typeof r === 'string' ? 'the string ' + JSON.stringify(r) : `a ${typeof r} (${JSON.stringify(r)})`;
+    cannotRun(`renames must be an object mapping an old name to a new one, such as { "UseButton": "ConfirmButton" }, got ${got}`);
+  }
+  const bad = Object.entries(r).filter(([, to]) => typeof to !== 'string' || !to);
+  if (bad.length) {
+    cannotRun('renames must map each old name to a new name; not a name: ' +
+      bad.map(([from, to]) => `${JSON.stringify(from)} -> ${JSON.stringify(to)}`).join(', '));
+  }
+}
 const uxmlText = readFileSync(at(job.uxml), 'utf8');
 const uxmlName = basename(job.uxml);
 

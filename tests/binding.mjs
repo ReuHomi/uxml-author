@@ -406,5 +406,51 @@ section('V — an unexpected error is code 2, and says what it had written');
   });
 }
 
+section('W — renames that are not a map of names are refused, not applied letter by letter');
+{
+  const bindRun = (jobPath) => {
+    try { return { code: 0, out: execFileSync('node', [ROOT + 'scripts/bind-csharp.mjs', jobPath], { encoding: 'utf8', stdio: 'pipe' }) }; }
+    catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
+  };
+  writeFileSync(T + 'ren.uxml', THREE);
+  const renJob = (renames) => {
+    writeFileSync(T + 'ren.json', JSON.stringify({ uxml: 'ren.uxml', className: 'renController', contract: 'ren-contract.md', renames }));
+    rmSync(T + 'ren-contract.md', { force: true });
+    return bindRun(T + 'ren.json');
+  };
+  const cases = [
+    ['UseButton', /got the string "UseButton"/, 'a string'],
+    [['UseButton'], /got an array \["UseButton"\]/, 'an array'],
+    [null, /got null/, 'null'],
+    [3, /got a number \(3\)/, 'a number'],
+    [{ UseButton: 7 }, /not a name: "UseButton" -> 7/, 'a value that is not a string'],
+    [{ UseButton: '' }, /not a name: "UseButton" -> ""/, 'an empty new name'],
+  ];
+  for (const [renames, re, what] of cases) {
+    const r = renJob(renames);
+    expect(r.code === 2 && /renames must/.test(r.out) && re.test(r.out) && !existsSync(T + 'ren-contract.md'),
+      `renames as ${what} → 2, named, and no contract written (got ${r.code})`);
+  }
+  const good = renJob({ UseButton: 'ConfirmButton' });
+  expect(good.code !== 2, 'a proper map of names is accepted');
+
+  const path = ROOT + 'scripts/bind-csharp.mjs', orig = readFileSync(path, 'utf8');
+  const target = "  if (r === null || typeof r !== 'object' || Array.isArray(r)) {";
+  expect(orig.includes(target), 'mutation target is present: the renames shape check');
+  try {
+    writeFileSync(path, orig.replace(target, '  if (false) {'));
+    const r = renJob('UseButton');
+    expect(!(r.code === 2 && /renames must/.test(r.out)),
+      `mutation (no renames check) → the string is not refused by name (exit ${r.code}), so the case above catches it`);
+  } finally { writeFileSync(path, orig); }
+  const target2 = "  const bad = Object.entries(r).filter(([, to]) => typeof to !== 'string' || !to);";
+  expect(orig.includes(target2), 'mutation target is present: the renames value check');
+  try {
+    writeFileSync(path, orig.replace(target2, '  const bad = [];'));
+    const r = renJob({ UseButton: 7 });
+    expect(!/not a name/.test(r.out), `mutation (no value check) → a non-name value slips past (exit ${r.code}), so the case above catches it`);
+  } finally { writeFileSync(path, orig); }
+}
+
 console.log(failures ? `\nFAILED: ${failures}` : '\nall Step 3 conditions hold');
 process.exit(failures ? 1 : 0);
