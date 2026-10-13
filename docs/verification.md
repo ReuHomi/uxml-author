@@ -13,7 +13,7 @@ way proves nothing.
 | Suite | Guards |
 | --- | --- |
 | `conditions` | painting, the collapse channel and what it must not swallow (hidden, emptied), injected images, multi-sheet resolution |
-| `exitcodes` | 0, 1, 2 and 3 stay distinguishable and rank 2 over 1 over 3, including a simulated missing `happy-dom`; assembled screens, a mistyped `element-name`, a missing template, a cyclic graph, slots, package paths |
+| `exitcodes` | 0, 1, 2 and 3 stay distinguishable and rank 2 over 1 over 3, including a simulated missing `happy-dom`; 3 for an over-budget image and for a property the preview does not lay out; warnings sorted by the core's `reason` (a `text-shadow` screen 0, `aspect-ratio` 3, `colour` 1); assembled screens, a mistyped `element-name`, a missing template, a cyclic graph, slots, package paths |
 | `binding` | determinism, name retirement, renames, the untouched logic file, a repeated name refused before anything is written |
 | `docs` | SKILL.md still describes the code it ships with |
 
@@ -35,7 +35,12 @@ Notable mutations, and what would slip past without them:
   is applied to nothing, and the run looks like a check of the state it named.
 - **count an over-budget image as a problem** — a screen with a large
   background can never exit 0 however correct it is. And the reverse, **let 3
-  outrank 1** — a real defect hides behind "the preview is incomplete".
+  outrank 1** — a real defect hides behind "the preview may differ from Unity".
+- **sort warnings by `kind` again** — `unsupported-property` is both `colour`
+  (the author's typo) and `text-shadow` (this preview's limit). Failing on the
+  kind fails correct screens; passing on it lets the typo through. The mutations
+  file `not-uss` as "not drawn", ignore `affectsLayout`, and drop the unknown
+  `reason` / `subject.kind` default, and each is caught.
 - **exempt `Image` from the collapse check** — a sizeless image, once supplied,
   raises no warning in any channel.
 - **always write the logic half** — hand-written C# disappears while all other
@@ -94,7 +99,7 @@ did nothing because upscaling was capped at 1×.
    a partial directly.
 3. A button press reaches the handler in the human-owned file.
 4. A `Toggle` that the preview cannot draw renders normally in Unity, which is
-   what the "not drawn by this version" channel exists to tell you.
+   what the "not drawn by this preview" channel exists to tell you.
 
 ## Not verified
 

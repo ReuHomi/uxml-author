@@ -139,9 +139,10 @@ Both use the same exit codes: `0` ran and clean, `1` ran and found something,
 `2` **did not run** — nothing checked this output. The third is deliberately
 distinct from the second, because "checked and found a problem" and "never
 checked" must not look alike to whatever reads the result. The preview adds
-`3`: it ran and found nothing wrong with the screen, but an image was over the
-embed budget, so the preview is incomplete — adjust the budget, not the
-document. A problem outranks it. `bind-csharp` uses only `0`, `1` and `2`.
+`3`: it ran and found nothing wrong with the screen, but the preview may differ
+from Unity — an image was over the embed budget, or a property that moves
+boxes in Unity was not laid out — so those parts need checking in Unity; the
+document needs no edit. A problem outranks it. `bind-csharp` uses only `0`, `1` and `2`.
 
 ```bash
 npm test    # conditions, exit codes, C# binding, and documentation

@@ -327,6 +327,57 @@ console.log('\nG — the cap is never silent');
   expect(exitOf(p) === 0, 'while a good asset passes');
 }
 
+console.log('\nwhat the core says a warning is about decides the exit code');
+{
+  // Three screens a person will actually write. Each must land on its own code
+  // and stay there across core upgrades: a valid style the preview does not
+  // draw passes, one that moves boxes in Unity makes the preview incomplete,
+  // and a misspelt property is the document's to fix.
+  const screen = (name, uss, body = '<ui:Label name="Title" text="Inventory" />') => {
+    writeFileSync(TMP + `Styles/${name}.uss`, '#Panel { width: 300px; height: 200px; } ' + uss);
+    writeFileSync(TMP + `${name}.uxml`, `<ui:UXML xmlns:ui="UnityEngine.UIElements"><Style src="Styles/${name}.uss" />
+      <ui:VisualElement name="Panel">${body}</ui:VisualElement></ui:UXML>`);
+    return job('w-' + name, { uxml: `${name}.uxml`, panel: { width: 400, height: 300 } });
+  };
+  const shadow = runJob(screen('Shadow', '#Title { text-shadow: 1px 1px 0 black; }'));
+  expect(shadow.code === 0, `a correct screen that uses text-shadow → 0 (got ${shadow.code})`);
+  expect(/not drawn by this preview \(1\)[\s\S]*text-shadow/.test(shadow.out) && /problems \(0\)/.test(shadow.out),
+    'and text-shadow is listed as not drawn, not as a problem');
+  expect(/^Pass/.test(pageOf('w-Shadow').verdict), 'the page passes it too');
+
+  const aspect = runJob(screen('Aspect', '#Title { aspect-ratio: 2; }'));
+  expect(aspect.code === 3, `a screen that uses aspect-ratio → 3 (got ${aspect.code})`);
+  expect(/not laid out by this preview \(1\)[\s\S]*aspect-ratio \(Unity 6000\.3\+\)/.test(aspect.out) &&
+    /from this preview's layout, not Unity's/.test(aspect.out), 'and the report says which property and that coordinates are the preview\'s');
+  const pa = pageOf('w-Aspect');
+  expect(/^Incomplete preview/.test(pa.verdict) && /not laid out/.test(pa.verdict) && pa.channels['Not laid out by this preview'].count === 1,
+    'the page calls it incomplete and lists it: ' + pa.verdict);
+
+  const both = runJob(screen('AspectCollapse', '#Title { aspect-ratio: 2; }', '<ui:Label name="Title" text="x" /><ui:Image name="Loose" />'));
+  expect(both.code === 1 && /#Loose has no size and is invisible \(by this preview's layout/.test(both.out),
+    `aspect-ratio next to a collapsed image → 1, and the collapse says whose layout found it (got ${both.code})`);
+
+  const typo = runJob(screen('Colour', '#Title { colour: red; }'));
+  expect(typo.code === 1 && /colour: not in the USS property reference/.test(typo.out), `a misspelt colour → 1 (got ${typo.code})`);
+  expect(/^Attention/.test(pageOf('w-Colour').verdict), 'the page flags it too');
+
+  const font = runJob(screen('Font', '#Title { font-family: Arial; }'));
+  expect(font.code === 1 && /write -unity-font-definition instead/.test(font.out), 'font-family → 1, and the report names what to write instead');
+
+  const root = runJob(screen('Root', ':root { width: 400px; }'));
+  expect(root.code === 0 && /ignored here and in Unity \(1\)/.test(root.out), ':root → 0, listed as nothing to do');
+
+  // mutations
+  mutate('src/check.js', "        return subj && subj.affectsLayout === true ? 'layoutGaps' : 'unsupported';", "        return 'unsupported';", () =>
+    expect(runJob(TMP + 'w-Aspect.json').code === 0, 'mutation (affectsLayout ignored) → aspect-ratio passes as 0, so the 3 case catches it'));
+  mutate('src/check.js', "      case 'not-uss':\n      case 'invalid-value':\n        return 'other';",
+    "      case 'invalid-value':\n        return 'other';\n      case 'not-uss':\n        return 'unsupported';", () => {
+    expect(runJob(TMP + 'w-Colour.json').code === 0, 'mutation (not-uss filed as not drawn) → the colour typo passes, so the 1 case catches it');
+  });
+  mutate('src/check.js', "      case 'not-rendered':\n", "      case 'not-rendered-x':\n", () =>
+    expect(runJob(TMP + 'w-Shadow.json').code === 1, 'mutation (kind-agnostic default only) → text-shadow fails a correct screen, so the 0 case catches it'));
+}
+
 console.log('\ncode 3 — ran, no defect, but the budget kept an image out of the preview');
 {
   const { readFileSync } = await import('node:fs');
@@ -378,7 +429,7 @@ console.log('\ncode 3 — ran, no defect, but the budget kept an image out of th
 
   mutate('src/check.js', "    var overBudget = meta.overBudget || [];\n", "    var overBudget = meta.overBudget || [];\n    overBudget.forEach(function (a) { push('over budget: ' + a.path); });\n", () =>
     expect(runJob(TMP + 'b-over.json').code === 1, 'mutation (over budget counted as a problem) → the 3 case becomes 1'));
-  mutate('src/check.js', 'code: problems.length ? 1 : overBudget.length ? 3 : 0', 'code: overBudget.length ? 3 : problems.length ? 1 : 0', () =>
+  mutate('src/check.js', 'code: problems.length ? 1 : (overBudget.length || layoutGaps.length) ? 3 : 0', 'code: (overBudget.length || layoutGaps.length) ? 3 : problems.length ? 1 : 0', () =>
     expect(runJob(TMP + 'b-both.json').code === 3, 'mutation (3 outranks 1) → the defect case becomes 3'));
   mutate('scripts/preview.mjs', '    budget[k] = v;', '', () =>
     expect(runJob(TMP + 'b-raised.json').code === 3, 'mutation (the job budget is ignored) → the raised case stays 3'));
@@ -548,7 +599,7 @@ console.log('\nassembled screens — more than one file behind one panel');
   try { sl = execFileSync('node', [ROOT + 'scripts/preview.mjs', slot], { encoding: 'utf8' }); }
   catch (e) { sl = (e.stdout || '') + (e.stderr || ''); }
   expect(/slot/.test(sl), 'a slot is reported');
-  expect(/slot/.test(sl.split('assets not yet present')[0].split('not drawn by this version')[1] || ''),
+  expect(/slot/.test(sl.split('assets not yet present')[0].split('not drawn by this preview')[1] || ''),
     'in the section for things invisible here and present in Unity');
   expect(exitOf(slot) === 0,
     'and it does not fail the screen — the same standing the fallback controls have');

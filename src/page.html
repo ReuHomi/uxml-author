@@ -284,10 +284,17 @@
     paintTheme();
 
     /* report ───────────────────────────────────────────────────────── */
-    channel('read', 'Not drawn by this version',
-      'Falls back to a plain element, so it has zero size here. Unity draws it. Nothing on ' +
-      'screen marks the absence, which makes this list the only trace.',
+    channel('read', 'Not drawn by this preview',
+      'Valid USS or UXML that Unity applies and this preview does not \u2014 a control drawn as a plain ' +
+      'element, a property not painted. Not a fault: keep it. Nothing on screen marks the absence, ' +
+      'which makes this list the only trace.',
       res.unsupported, function (x) { return esc(x.message); });
+
+    channel('budget', 'Not laid out by this preview',
+      'Valid USS that changes size or position in Unity, left out of this layout. Sizes and positions ' +
+      'here may differ from Unity, and any zero-size or overflow finding is this preview\u2019s, not ' +
+      'Unity\u2019s. Check this part in Unity.',
+      res.layoutGaps, function (x) { return esc(globalThis.UxmlCheck.describeGap(x)); });
 
     channel('flat', 'Assets not yet present',
       'Normal while a UI is new; drawn as a magenta hatch. Kept apart from real problems on ' +
@@ -347,8 +354,14 @@
       'than an event. It stays out of the verdict.',
       res.versionDependent, function (x) { return esc(x.message); });
 
-    channel('problem', 'Other warnings', 'Unsupported properties, selectors, units.',
-      res.other, function (x) { return '<code>' + esc(x.kind) + '</code> ' + esc(x.message); });
+    channel('flat', 'Ignored here and in Unity',
+      'Not a defect: Unity ignores these too. Nothing to do.',
+      res.matchesUnity, function (x) { return esc(x.message); });
+
+    channel('problem', 'Other warnings',
+      'Written in a way USS does not have, or with a value that cannot work. These are the ' +
+      'document\u2019s to fix; where USS has another name, it is given.',
+      res.other, function (x) { return esc(globalThis.UxmlCheck.describeDefect(x)); });
 
     var footer = document.createElement('p');
     footer.className = 'note';
@@ -371,9 +384,13 @@
     } else if (verdict.code === 1) {
       say('Attention \u2014 it painted, but the report flags something below.', 'var(--amber)');
     } else if (verdict.code === 3) {
-      say('Incomplete preview \u2014 no problems found in the screen, but ' + verdict.overBudget.length +
-          ' image(s) were over the embed budget and are not drawn. Adjust the budget, not the document.',
-          'var(--blue)');
+      var why = [];
+      if (verdict.overBudget.length) why.push(verdict.overBudget.length + ' image(s) over the embed budget are not drawn');
+      if (verdict.layoutGaps.length) why.push(verdict.layoutGaps.length === 1
+        ? '1 property that moves boxes in Unity is not laid out'
+        : verdict.layoutGaps.length + ' properties that move boxes in Unity are not laid out');
+      say('Incomplete preview \u2014 no problems found in the screen, but it may differ from Unity: ' +
+          why.join('; ') + '. Check those parts in Unity; do not edit the document for this.', 'var(--blue)');
     } else {
       say('Pass \u2014 it painted, and the judgement channels are empty.', 'var(--green)');
     }

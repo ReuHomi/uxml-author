@@ -422,6 +422,18 @@ const layout = (res) => JSON.stringify(res.boxes.map((b) => [b.name, b.box]));
 }
 const refusal = (C, extra) => C.checkStates(core, useInput(extra)).errors.join(' | ');
 {
+  // The allow-list is the core's, not a copy kept here. A copy is a second
+  // place to forget when Unity adds a state.
+  expect(!/\[\s*'hover',\s*'active'/.test(CHECK_SRC), 'check.js holds no copy of the state list');
+  const more = { ...core, USS_STATES: [...core.USS_STATES, 'future-state'] };
+  expect(loadCheck().checkStates(more, useInput({ states: { '#Use': ['future-state'] } })).errors.length === 0,
+    'a state the core adds is accepted without touching check.js');
+  const Pinned = loadCheck((x) => x.replace('var allowed = Array.prototype.slice.call(core.USS_STATES);',
+    "var allowed = ['hover', 'active', 'inactive', 'focus', 'disabled', 'enabled', 'checked'];"));
+  expect(Pinned.checkStates(more, useInput({ states: { '#Use': ['future-state'] } })).errors.length > 0,
+    'mutation (a pinned copy again) → the new state is refused, so the case above catches it');
+}
+{
   const C = loadCheck();
   const cases = [
     [{ states: { '#Use': 'hover' } }, /must be an array.*the string "hover"/, 'a string where an array belongs'],
@@ -463,7 +475,7 @@ const refusal = (C, extra) => C.checkStates(core, useInput(extra)).errors.join('
     'mutation (no array check) → the string is split into letters and the refusal no longer says why: ' + e);
 }
 {
-  const C = loadCheck((x) => x.replace("typeof n !== 'string' || UNITY_STATES.indexOf(n) === -1", "typeof n !== 'string'"));
+  const C = loadCheck((x) => x.replace("typeof n !== 'string' || allowed.indexOf(n) === -1", "typeof n !== 'string'"));
   expect(refusal(C, { states: { '#Use': ['hovr'] } }) === '', 'mutation (no allow-list) → a mistyped state is accepted');
 }
 {
@@ -471,14 +483,35 @@ const refusal = (C, extra) => C.checkStates(core, useInput(extra)).errors.join('
   expect(refusal(C, { states: { '#Nope': ['hover'] } }) === '', 'mutation (no match check) → a key matching nothing is accepted');
 }
 {
-  const C = loadCheck((x) => x.replace("if (w.kind !== 'unsupported-selector' || w.at !== undefined) return;", 'return;'));
+  const READ = "if (subj && subj.kind === 'states-key' && Object.prototype.hasOwnProperty.call(states, subj.key)) refused.add(subj.key);";
+  const C = loadCheck((x) => x.replace(READ, ''));
   const e = refusal(C, { states: { '#Use[x]': ['hover'] } });
   expect(!/not a usable USS selector/.test(e), 'mutation (core refusal not read) → the unusable key is misdescribed: ' + e);
 }
 {
+  // The refusal reads the core's `subject`, not its message. A core that
+  // rewords every warning — which 0.5.1 says it may do in any release — must
+  // still have its refusal of a states key noticed.
+  const reworded = {
+    ...core,                                // the core's exports are getters; copy their values
+    resolveStyles: (doc, opts) => {
+      const out = core.resolveStyles(doc, opts);
+      return { ...out, warnings: out.warnings.map((w) => ({ ...w, message: 'reworded by a future core' })) };
+    },
+  };
+  const e = loadCheck().checkStates(reworded, useInput({ states: { '#Use[x]': ['hover'] } })).errors.join(' | ');
+  expect(/"#Use\[x\]" is not a usable USS selector/.test(e), 'with every core message reworded, the unusable key is still refused by its subject');
+  // mutation: go back to matching the wording
+  const ByText = loadCheck((x) => x.replace(
+    "if (subj && subj.kind === 'states-key' && Object.prototype.hasOwnProperty.call(states, subj.key)) refused.add(subj.key);",
+    "keys.forEach(function (k) { if (w.message.indexOf('states key \"' + k + '\"') === 0) refused.add(k); });"));
+  const e2 = ByText.checkStates(reworded, useInput({ states: { '#Use[x]': ['hover'] } })).errors.join(' | ');
+  expect(!/not a usable USS selector/.test(e2), 'mutation (match the message text again) → the reworded core slips past, so the case above catches it');
+}
+{
   const C = loadCheck((x) => x.replace("if (st.errors.length) throw new Error(", "if (false) throw new Error("));
   const res = C.run(core, stage(), useInput({ states: { '#Use[x]': ['hover'] } }));
-  expect(res.other.some((w) => /states key/.test(w.message)),
+  expect(res.other.some((w) => w.subject && w.subject.kind === 'states-key' && w.subject.key === '#Use[x]'),
     "mutation (run() does not refuse) → the job's bad key lands among the document's own warnings");
   res.dispose();
 }
@@ -573,6 +606,89 @@ function probeTable(C) {
   const bad = probeTable(C).filter((r) => r.passed !== r.applied).map((r) => r.key + '+' + r.active.join(','));
   expect(bad.includes('#Use:disabled+') && bad.includes('#Child:disabled+') && bad.includes('#Parent:disabled #Child+'),
     'mutation (probe keeps enabled="false") → it passes keys aimed at disabled elements: ' + bad.join(' '));
+}
+
+section('L — warnings are sorted by what the core says they are about');
+{
+  const C = loadCheck();
+  const one = (uss, uxmlBody = '<ui:Label name="P" text="hi" />') => {
+    const res = C.run(core, stage(), {
+      uxml: `<ui:UXML xmlns:ui="UnityEngine.UIElements"><Style src="W.uss" />${uxmlBody}</ui:UXML>`,
+      sheets: { 'W.uss': '#P { width: 100px; height: 40px; } ' + uss }, panel: PANEL,
+    });
+    res.dispose();
+    return res;
+  };
+  const has = (list, prop) => list.some((w) => w.subject && w.subject.property === prop);
+  const shadow = one('#P { text-shadow: 1px 1px 0 black; }');
+  expect(has(shadow.unsupported, 'text-shadow') && !has(shadow.other, 'text-shadow') && shadow.layoutGaps.length === 0,
+    'text-shadow (not-rendered, no layout effect) → "not drawn by this preview", not a defect');
+  const aspect = one('#P { aspect-ratio: 2; }');
+  expect(has(aspect.layoutGaps, 'aspect-ratio') && !has(aspect.unsupported, 'aspect-ratio'),
+    'aspect-ratio (not-rendered, affectsLayout) → its own channel');
+  expect(C.judge(aspect, {}).code === 3, 'and on its own that is code 3');
+  const typo = one('#P { colour: red; }');
+  expect(has(typo.other, 'colour') && C.judge(typo, {}).code === 1, 'colour (not-uss) → a defect, code 1');
+  const font = one('#P { font-family: Arial; }');
+  const fw = font.other.find((w) => w.subject && w.subject.property === 'font-family');
+  expect(fw && /write -unity-font-definition instead/.test(C.describeDefect(fw)), 'font-family → a defect that names the USS property to write: ' + (fw && C.describeDefect(fw)));
+  const grid = one('#P { display: grid; }');
+  expect(has(grid.other, 'display') && C.judge(grid, {}).code === 1, 'display: grid (invalid-value) → a defect, code 1');
+  const root = one(':root { width: 380px; }');
+  expect(root.matchesUnity.some((w) => w.subject && w.subject.selector === ':root') && C.judge(root, {}).code === 0,
+    ':root (matches-unity) → listed as nothing to do, code 0');
+  const button = one('', '<ui:Button name="P" text="b" />');
+  expect(button.versionDependent.length > 0 && C.judge(button, {}).code === 0, 'theme defaults (version-dependent) keep their channel, code 0');
+  const both = one('#P { aspect-ratio: 2; } #Z { width: 0; }', '<ui:Label name="P" text="hi" /><ui:Image name="Z" />');
+  const j = C.judge(both, {});
+  expect(j.code === 1 && j.problems.some((p) => /#Z has no size.*by this preview's layout/.test(p)),
+    'a collapse next to a layout gap is still 1, and says it is this preview\'s layout');
+  expect(!C.judge(typo, {}).problems.some((p) => /this preview's layout/.test(p)) ,
+    'and without a gap, no such caveat');
+
+  // Open sets: values the core may add later are not guessed at.
+  const cls = (w) => C.classify(w);
+  expect(cls({ kind: 'unsupported-property', reason: 'brand-new-reason', message: 'x' }) === 'other', 'an unknown reason → other (exit 1), never dropped');
+  expect(cls({ kind: 'unsupported-property', reason: 'not-rendered', subject: { kind: 'brand-new-subject' }, message: 'x' }) === 'other',
+    'an unknown subject kind → other, even under a reason that would not fail');
+  expect(cls({ kind: 'asset-unresolved', message: 'x', subject: { kind: 'asset', path: 'a.png', form: 'url' } }) === 'missingAssets',
+    'no reason: a missing image keeps its non-failing channel');
+  expect(cls({ kind: 'import-unresolved', message: 'x', subject: { kind: 'import', url: 'a.uss', from: null } }) === 'other',
+    'no reason, any other kind → other');
+  expect(cls({ kind: 'duplicate-name-in-tree', reason: 'matches-unity', subject: { kind: 'name', name: 'n' }, message: 'x' }) === 'repeatedNames',
+    'a repeated name (matches-unity, name) keeps its own channel');
+}
+// mutations — each undoes one branch the cases above depend on
+{
+  const M = (from, to) => loadCheck((x) => { if (!x.includes(from)) throw new Error('mutation target missing: ' + from); return x.replace(from, to); });
+  const run1 = (C, uss, body = '<ui:Label name="P" text="hi" />') => {
+    const r = C.run(core, stage(), { uxml: `<ui:UXML xmlns:ui="UnityEngine.UIElements"><Style src="W.uss" />${body}</ui:UXML>`,
+      sheets: { 'W.uss': '#P { width: 100px; height: 40px; } ' + uss }, panel: PANEL });
+    r.dispose(); return C.judge(r, {}).code;
+  };
+  expect(run1(M("        return subj && subj.affectsLayout === true ? 'layoutGaps' : 'unsupported';", "        return 'unsupported';"), '#P { aspect-ratio: 2; }') === 0,
+    'mutation (affectsLayout ignored) → aspect-ratio passes as 0, so the case above catches it');
+  expect(run1(M("      case 'not-uss':\n", "      case 'not-uss':\n        return 'unsupported';\n"), '#P { colour: red; }') !== 1,
+    'mutation (not-uss filed as "not drawn") → the colour typo stops failing, so the case above catches it');
+  expect(run1(M("      case 'matches-unity':\n        return subj && subj.kind === 'name' ? 'repeatedNames' : 'matchesUnity';\n", ''), ':root { width: 380px; }') === 1,
+    'mutation (matches-unity unhandled) → :root fails the run');
+  expect(run1(M("      case 'not-rendered':\n", "      case 'not-rendered-x':\n"), '#P { text-shadow: 1px 1px 0 black; }') === 1,
+    'mutation (not-rendered unhandled) → text-shadow fails the run, as the default branch says it must');
+  expect(M("    if (subj && KNOWN_SUBJECTS.indexOf(subj.kind) === -1) return 'other';\n", '')
+    .classify({ kind: 'unsupported-property', reason: 'not-rendered', subject: { kind: 'brand-new-subject' }, message: 'x' }) !== 'other',
+    'mutation (subject kinds not checked) → the unknown subject is filed as not drawn');
+  expect(M("      default:\n        return 'other';", "      default:\n        return 'matchesUnity';")
+    .classify({ kind: 'x', reason: 'brand-new-reason', message: 'x' }) !== 'other',
+    'mutation (unknown reason filed as harmless) → the open-set case catches it');
+  expect(M("code: problems.length ? 1 : (overBudget.length || layoutGaps.length) ? 3 : 0", "code: problems.length ? 1 : overBudget.length ? 3 : 0")
+    .judge({ painted: { childCount: 1, elementCount: 1, boxCount: 1 }, unindexed: [], ambiguousDeps: [], cascadeMismatch: [], collapsed: [], overflow: [], other: [],
+             layoutGaps: [{ reason: 'not-rendered' }] }, {}).code === 0,
+    'mutation (layout gaps not in the verdict) → code 0 where it must be 3');
+  const NoBasis = M("var basis = (res.layoutGaps || []).length ?", "var basis = false ?");
+  const rb = NoBasis.run(core, stage(), { uxml: '<ui:UXML xmlns:ui="UnityEngine.UIElements"><Style src="W.uss" /><ui:Label name="P" text="hi" /><ui:Image name="Z" /></ui:UXML>',
+    sheets: { 'W.uss': '#P { width: 100px; height: 40px; aspect-ratio: 2; }' }, panel: PANEL });
+  rb.dispose();
+  expect(!NoBasis.judge(rb, {}).problems.some((p) => /this preview's layout/.test(p)), 'mutation (no preview-basis label) → the caveat case catches it');
 }
 
 section('H — no silent default panel size');

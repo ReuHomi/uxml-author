@@ -116,16 +116,13 @@
     return { resolve: resolve, requested: requested, missing: missing, ambiguous: ambiguous };
   }
 
-  // The states a Unity element can be in, as USS pseudo-classes.
-  // Source: Unity Manual, "USS selectors: Pseudo-classes"
-  //   https://docs.unity3d.com/Manual/UIE-USS-Selectors-Pseudo-Classes.html
-  // `:root` is left out because it names a place in the tree, not a state —
-  // the core matches it structurally and ignores it in a state list. `:selected`
-  // is left out because that page says USS does not support it. Anything else
-  // is a name Unity will never put on an element, so a rule written for it can
-  // never match there, and a preview that applied it would show a screen that
-  // cannot exist.
-  var UNITY_STATES = ['hover', 'active', 'inactive', 'focus', 'disabled', 'enabled', 'checked'];
+  // The states a Unity element can be in are the core's USS_STATES (0.5.1+),
+  // transcribed there from Unity's pseudo-class page without `:root` (a place
+  // in the tree, not a state) and `:selected` (USS does not support it). This
+  // file kept its own copy until the core exported one; a second copy is a
+  // second place to forget when Unity adds a state. Anything outside the list
+  // is a name Unity never puts on an element, so a preview that applied it
+  // would show a screen that cannot exist.
   var PROBE_SHEET = '__uxml-author-state-probe__.uss';
   var PROBE_PROP = '--uxml-author-state-probe-';
   var ROOT_OPEN = /<([A-Za-z_][\w.-]*:)?UXML\b[^>]*>/;
@@ -137,7 +134,7 @@
     for (var i = 0; i < node.children.length; i++) stripEnabled(node.children[i]);
   }
 
-  function stateList(value, where, errors) {
+  function stateList(value, where, errors, allowed) {
     if (!Array.isArray(value)) {
       // A string is iterable, and the core would quietly apply "h", "o", "v",
       // "e", "r" — none of which matches anything. Refused by name for that reason.
@@ -147,9 +144,9 @@
     }
     var ok = true;
     value.forEach(function (n) {
-      if (typeof n !== 'string' || UNITY_STATES.indexOf(n) === -1) {
+      if (typeof n !== 'string' || allowed.indexOf(n) === -1) {
         errors.push(where + ' names ' + JSON.stringify(n) + ', which is not a Unity state; use one of ' +
-          UNITY_STATES.join(', '));
+          allowed.join(', '));
         ok = false;
       }
     });
@@ -169,6 +166,7 @@
    */
   function checkStates(core, input) {
     var errors = [];
+    var allowed = Array.prototype.slice.call(core.USS_STATES);
     var rawStates = input.states === undefined ? {} : input.states;
     var rawActive = input.activeStates === undefined ? [] : input.activeStates;
     var states = {};
@@ -181,11 +179,11 @@
           errors.push('states key ' + JSON.stringify(key) + ' is not a selector');
           return;
         }
-        var list = stateList(rawStates[key], 'states[' + JSON.stringify(key) + ']', errors);
+        var list = stateList(rawStates[key], 'states[' + JSON.stringify(key) + ']', errors, allowed);
         if (list) states[key] = list;
       });
     }
-    var active = stateList(rawActive, 'activeStates', errors) || [];
+    var active = stateList(rawActive, 'activeStates', errors, allowed) || [];
     var activeSet = new Set(active);
 
     var keys = Object.keys(states);
@@ -194,18 +192,18 @@
         var res = makeResolver(input.sheets || {}, input.templates || {}, extra);
         return core.expandTemplates(core.parse(text, undefined, { resolveImport: res.resolve })).document;
       };
-      // First, which keys the core itself refuses as selectors. Its warning for
-      // one carries no `at`: it comes from the job, not from a sheet. A
-      // document's own unsupported selector always has one, and keeps its old
-      // channel. A refused key is left out of the probe below, where its text
-      // could otherwise spoil the rules around it.
+      // First, which keys the core itself refuses as selectors. Since 0.5.1 the
+      // core says so as data — `subject: { kind: 'states-key', key }` — so the
+      // key is read off the warning instead of matched against its wording,
+      // which the core may change in any release. A document's own unsupported
+      // selector has a `selector` subject and keeps its old channel. A refused
+      // key is left out of the probe below, where its text could otherwise
+      // spoil the rules around it.
       var refused = new Set();
       core.resolveStyles(parseWith(String(input.uxml), null), { activeStates: activeSet, states: states })
         .warnings.forEach(function (w) {
-          if (w.kind !== 'unsupported-selector' || w.at !== undefined) return;
-          keys.forEach(function (k) {
-            if (w.message.indexOf('states key "' + k + '"') === 0) refused.add(k);
-          });
+          var subj = w.subject;
+          if (subj && subj.kind === 'states-key' && Object.prototype.hasOwnProperty.call(states, subj.key)) refused.add(subj.key);
         });
       var usable = keys.filter(function (k) { return !refused.has(k); });
       var hit = new Set();
@@ -360,18 +358,23 @@
     //     constraint on the C# that can be written against it, so it gets its own
     //     channel. `bind-csharp` refuses separately, where the question is asked.
     //
-    var unsupported = [], missingAssets = [], versionDependent = [], repeatedNames = [], other = [];
+    var channels = {
+      unsupported: [], layoutGaps: [], missingAssets: [], versionDependent: [],
+      repeatedNames: [], matchesUnity: [], other: [],
+    };
     var allWarnings = r.warnings.concat(expansion.warnings || []);
-    allWarnings.forEach(function (w) {
-      if (w.kind === 'unsupported-control' || w.kind === 'template-slot-unsupported') unsupported.push(w);
-      else if (w.kind === 'asset-unresolved') missingAssets.push(w);
-      else if (w.kind === 'version-dependent' || w.kind === 'package-path-not-searched') versionDependent.push(w);
-      else if (w.kind === 'duplicate-name-in-tree') repeatedNames.push(w);
-      else other.push(w);
-    });
+    allWarnings.forEach(function (w) { channels[classify(w)].push(w); });
+    var unsupported = channels.unsupported, missingAssets = channels.missingAssets,
+        versionDependent = channels.versionDependent, repeatedNames = channels.repeatedNames,
+        other = channels.other;
 
+    // A control or slot the preview does not draw is height 0 by construction,
+    // so its node is not also counted as collapsed. A property it does not
+    // draw says nothing about the element's size, so it excludes nothing.
     var excluded = new Set();
-    unsupported.forEach(function (w) { if (w.node != null) excluded.add(w.node); });
+    unsupported.forEach(function (w) {
+      if (w.node != null && (!w.subject || w.subject.kind === 'control')) excluded.add(w.node);
+    });
 
     // Two different things used to share one `return` here, and only one of them
     // is legitimate. A node with no `name` is genuinely not a contract surface.
@@ -493,6 +496,8 @@
       },
       parseWarnings: parsed.warnings || [],
       unsupported: unsupported,
+      layoutGaps: channels.layoutGaps,
+      matchesUnity: channels.matchesUnity,
       missingAssets: missingAssets,
       versionDependent: versionDependent,
       repeatedNames: repeatedNames,
@@ -518,6 +523,69 @@
     };
   }
 
+  // Every `subject.kind` uxml-preview 0.5.1 documents. Both `reason` and
+  // `subject.kind` are open sets — the core may add values in a minor release —
+  // so anything outside these lists is not guessed at: it goes to `other`,
+  // where it is printed and fails the run, rather than vanishing into a channel
+  // that never reaches the exit code.
+  var KNOWN_SUBJECTS = ['property', 'selector', 'states-key', 'asset', 'import', 'control', 'name', 'at-rule'];
+
+  /**
+   * Purpose: which channel a warning belongs to, decided by what the core says
+   *          the warning is about (`reason`) rather than by what kind of
+   *          warning it is. One `kind` covers both the author's mistakes and
+   *          this preview's limits — `unsupported-property` is `colour` and
+   *          also `text-shadow` — and only `reason` tells them apart.
+   * Ensures: one of the channel names `run` keeps:
+   *   not-uss, invalid-value  -> other          the author's; exit 1
+   *   not-rendered            -> unsupported    valid, not drawn here; no exit
+   *                           -> layoutGaps     ...and it moves boxes in Unity; exit 3
+   *   matches-unity           -> matchesUnity   nothing to do; no exit
+   *                              (a repeated name keeps its own channel)
+   *   version-dependent       -> versionDependent
+   *   no reason               -> by kind, as before 0.5.1: the core omits a
+   *                              reason when none applies, e.g. an asset or a
+   *                              file the host did not supply
+   *   anything else           -> other
+   */
+  function classify(w) {
+    var subj = w.subject;
+    if (subj && KNOWN_SUBJECTS.indexOf(subj.kind) === -1) return 'other';
+    switch (w.reason) {
+      case 'not-uss':
+      case 'invalid-value':
+        return 'other';
+      case 'not-rendered':
+        return subj && subj.affectsLayout === true ? 'layoutGaps' : 'unsupported';
+      case 'matches-unity':
+        return subj && subj.kind === 'name' ? 'repeatedNames' : 'matchesUnity';
+      case 'version-dependent':
+        return 'versionDependent';
+      case undefined:
+        if (w.kind === 'asset-unresolved') return 'missingAssets';
+        if (w.kind === 'version-dependent') return 'versionDependent';
+        return 'other';
+      default:
+        return 'other';
+    }
+  }
+
+  /** How a warning in `other` reads in a report: the core's words, plus what to write instead. */
+  function describeDefect(w) {
+    var s = w.kind + ': ' + w.message;
+    var subj = w.subject;
+    if (subj && subj.kind === 'property' && subj.replacements && subj.replacements.length) {
+      s += ' — write ' + subj.replacements.join(', ') + ' instead';
+    }
+    return s;
+  }
+
+  /** How a layout gap reads: the property, and the Unity version that has it. */
+  function describeGap(w) {
+    var subj = w.subject || {};
+    return (subj.property || w.kind) + (subj.since ? ' (Unity ' + subj.since + '+)' : '') + ': ' + w.message;
+  }
+
   /**
    * Purpose: the verdict, in one place. The gate turns `code` into its exit
    *          code and the page turns it into its verdict line, so the two
@@ -527,9 +595,10 @@
    *           because of the budget. A missing asset file never gets here: the
    *           host refuses the job instead.
    * Ensures: code 1 when `problems` is non-empty — a defect in the document
-   *          or in what was given to judge it; otherwise 3 when the budget
-   *          kept an image out, which makes the preview incomplete but says
-   *          nothing about the document; otherwise 0. A defect outranks an
+   *          or in what was given to judge it; otherwise 3 when the preview
+   *          may differ from Unity — the budget kept an image out, or a
+   *          property that moves boxes in Unity was not laid out — which says
+   *          nothing against the document; otherwise 0. A defect outranks an
    *          incomplete preview. Code 2 is never produced here: whoever calls
    *          this already ran the check.
    */
@@ -553,15 +622,24 @@
     var templateMisses = meta.templateMisses || [], sheetMisses = meta.sheetMisses || [];
     if (templateMisses.length) push(templateMisses.length + ' template document(s) could not be read — the instances they fill are missing from the screen entirely, not merely unstyled');
     if (sheetMisses.length) push(sheetMisses.length + ' stylesheet(s) could not be read — the coordinates below are wrong, not merely incomplete');
-    res.collapsed.forEach(function (c) { push('<' + c.type + '> #' + c.name + ' has no size and is invisible'); });
-    res.overflow.forEach(function (c) { push('<' + c.type + '> #' + c.name + ' runs outside the panel'); });
-    res.other.forEach(function (x) { push(x.kind + ': ' + x.message); });
+    // When the preview leaves out something that moves boxes in Unity, its
+    // coordinates are its own. The findings still stand as findings — they are
+    // what this layout shows — but say whose layout they come from.
+    var basis = (res.layoutGaps || []).length ? ' (by this preview\'s layout, which leaves out a property that moves boxes in Unity)' : '';
+    res.collapsed.forEach(function (c) { push('<' + c.type + '> #' + c.name + ' has no size and is invisible' + basis); });
+    res.overflow.forEach(function (c) { push('<' + c.type + '> #' + c.name + ' runs outside the panel' + basis); });
+    res.other.forEach(function (x) { push(describeDefect(x)); });
     var overBudget = meta.overBudget || [];
-    return { problems: problems, overBudget: overBudget, code: problems.length ? 1 : overBudget.length ? 3 : 0 };
+    var layoutGaps = res.layoutGaps || [];
+    return {
+      problems: problems, overBudget: overBudget, layoutGaps: layoutGaps,
+      code: problems.length ? 1 : (overBudget.length || layoutGaps.length) ? 3 : 0,
+    };
   }
 
   globalThis.UxmlCheck = {
-    run: run, judge: judge, resolveSheetUrl: resolveSheetUrl,
-    checkStates: checkStates, describeStates: describeStates, UNITY_STATES: UNITY_STATES,
+    run: run, judge: judge, classify: classify, describeDefect: describeDefect, describeGap: describeGap,
+    resolveSheetUrl: resolveSheetUrl,
+    checkStates: checkStates, describeStates: describeStates,
   };
 })();
