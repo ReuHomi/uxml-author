@@ -80,7 +80,9 @@ node scripts/preview.mjs job.json
 }
 ```
 Stylesheets are found relative to the UXML and read automatically; `assets` is
-optional and only for images the person supplied.
+optional and only for images the person supplied. A file named in `assets` that
+does not exist stops the run with code 2, listing every such file; leave out
+an image you do not have instead, and it is drawn as not yet present.
 
 Images are embedded into the preview within a budget: 4 MB per file and 16 MB
 in total by default, where 1 MB is 1024 × 1024 bytes on disk. A file over it is

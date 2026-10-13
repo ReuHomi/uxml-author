@@ -129,6 +129,25 @@ if (job.assetBudget !== undefined) {
     budget[k] = v;
   }
 }
+
+// An asset the job names and the disk does not have is a job that points at
+// nothing — the same kind of fault as a missing UXML — not a defect in the
+// screen. It used to be counted among the screen's problems and exit 1, which
+// told the caller to fix a document that was fine. Every missing file is
+// listed at once, so one run says everything that is wrong with the paths.
+if (job.assets !== undefined) {
+  if (job.assets === null || typeof job.assets !== 'object' || Array.isArray(job.assets)) {
+    cannotRun('assets must be an object mapping the path the USS uses to a file, got ' + JSON.stringify(job.assets));
+  }
+  const bad = Object.entries(job.assets).filter(([, f]) => typeof f !== 'string');
+  if (bad.length) cannotRun('assets must map each path to a file name; not a string: ' + bad.map(([k]) => k).join(', '));
+  const missing = Object.entries(job.assets).filter(([, f]) => !existsSync(at(f)));
+  if (missing.length) {
+    cannotRun(`${missing.length} asset file(s) named in the job do not exist:\n` +
+      missing.map(([k, f]) => `  - ${k}: ${f} (looked for ${at(f)})`).join('\n'),
+      'Fix the paths in assets, or remove the entries for images you do not have. An image the USS asks for and the job does not supply is drawn as not yet present, which is fine.');
+  }
+}
 const uxml = readFileSync(at(job.uxml), 'utf8');
 
 // ── environment ─────────────────────────────────────────────────────────────
@@ -232,19 +251,17 @@ for (const [key, text] of Object.entries(templates)) {
 }
 
 // ── encode assets, within a budget that is never silent ─────────────────────
-// Two outcomes, kept apart. A file that is not there is a broken job and stays
-// a problem. A file over the budget is fine — the preview is just short of it —
-// so it goes to its own list, which on its own makes the exit code 3, not 1.
+// Every file named here exists by now; a missing one stopped the run above. A
+// file over the budget is fine — the preview is just short of it — so it goes
+// to its own list, which on its own makes the exit code 3, not 1.
 // Files are read, never written: nothing here converts or replaces a source.
 const MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp' };
 const assets = {};
-const assetSkipped = [];
 const overBudget = [];
 const perFileLimit = budget.perFileMB * MB, totalLimit = budget.totalMB * MB;
 let assetTotal = 0;
 for (const [uxmlPath, file] of Object.entries(job.assets || {})) {
   const abs = at(file);
-  if (!existsSync(abs)) { assetSkipped.push({ path: uxmlPath, why: 'file not found: ' + file }); continue; }
   const buf = readFileSync(abs);
   const over = (why) => overBudget.push({ path: uxmlPath, file, bytes: buf.length, why, budget: { ...budget } });
   if (buf.length > perFileLimit) {
@@ -287,7 +304,7 @@ try { res = check.run(core, w.document.createElement('div'), input); }
 catch (e) { cannotRun('the render threw: ' + e.message); }
 
 // The verdict is check.js's, so the page reaches the same one.
-const meta = { sheetMisses, templateMisses, assetSkipped, overBudget, injectedNote: res.injected };
+const meta = { sheetMisses, templateMisses, overBudget, injectedNote: res.injected };
 const verdict = check.judge(res, meta);
 const problems = verdict.problems;
 

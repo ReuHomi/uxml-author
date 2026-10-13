@@ -296,18 +296,34 @@ console.log('\nG — the cap is never silent');
     assets: { 'Art/potion.png': 'demo/Art/potion.png' },
   });
   // The budget itself is exercised under "code 3" below. Here: the happy path
-  // reports the injection, and a missing file is reported rather than dropped
-  // — and stays a problem, unlike an image the budget left out.
+  // reports the injection, and a missing file stops the run. It used to be a
+  // problem (1), which told the caller to fix a document that was fine; the
+  // fault is in the job's paths, the same kind as a missing UXML, so it is 2.
+  // Every missing file is named in one go, not just the first.
   const p2 = job('capmiss', {
     uxml: 'demo/Inventory.uxml', panel: { width: 480, height: 320 },
-    assets: { 'Art/potion.png': 'demo/Art/gone.png' },
+    assets: { 'Art/potion.png': 'demo/Art/gone.png', 'Art/ok.png': 'demo/Art/potion.png', 'Art/bg.png': 'demo/Art/also-gone.png' },
   });
-  let out = '';
-  try { out = execFileSync('node', [ROOT + 'scripts/preview.mjs', p2], { encoding: 'utf8' }); }
-  catch (e) { out = e.stdout; }
-  expect(/asset not embedded/.test(out) && /file not found/.test(out),
-    'an asset that could not be embedded says so');
-  expect(exitOf(p2) === 1, 'and it counts as a problem, not a shrug');
+  const miss = runJob(p2);
+  expect(miss.code === 2, `a missing asset file → 2, the job points at nothing (got ${miss.code})`);
+  expect(/2 asset file\(s\) named in the job do not exist/.test(miss.out) &&
+    /Art\/potion\.png: demo\/Art\/gone\.png/.test(miss.out) && /Art\/bg\.png: demo\/Art\/also-gone\.png/.test(miss.out) &&
+    !/Art\/ok\.png:/.test(miss.out), 'and both missing files are named in one report, the present one is not');
+  expect(/No preview was written/.test(miss.out), 'and it says no preview was written');
+  for (const [bad, what] of [['Art/x.png', 'a string'], [[1], 'an array'], [{ 'Art/x.png': 5 }, 'a non-string file']]) {
+    const r = runJob(job('capbad', { uxml: 'demo/Inventory.uxml', panel: { width: 480, height: 320 }, assets: bad }));
+    expect(r.code === 2 && /assets must/.test(r.out), `assets that are ${what} → 2, refused by name (got ${r.code})`);
+  }
+  mutate('scripts/preview.mjs', '  if (missing.length) {', '  if (false) {', () => {
+    // Still a 2 — reading the missing file throws and the safety net catches
+    // it — but as a stack trace about one file, not a report naming them all.
+    const r = runJob(p2);
+    expect(!/named in the job do not exist/.test(r.out),
+      `mutation (missing files not refused) → only a crash about one file is left (exit ${r.code}), so the case above catches it`);
+  });
+  mutate('scripts/preview.mjs', "const missing = Object.entries(job.assets).filter(([, f]) => !existsSync(at(f)));",
+    "const missing = Object.entries(job.assets).filter(([, f]) => !existsSync(at(f))).slice(0, 1);", () =>
+    expect(!/Art\/bg\.png: /.test(runJob(p2).out), 'mutation (stop at the first missing file) → the second is not named, so the case above catches it'));
   expect(exitOf(p) === 0, 'while a good asset passes');
 }
 
@@ -335,8 +351,8 @@ console.log('\ncode 3 — ran, no defect, but the budget kept an image out of th
     'it is listed with path, size, reason and the budget applied');
   const po = pageOf('b-over');
   expect(/^Incomplete preview/.test(po.verdict) && po.colour === 'var(--blue)', 'the page calls it incomplete, neither pass nor problem: ' + po.verdict);
-  expect(po.channels['Over the embed budget'].count === 1 && po.channels['Images left out of the embed'].count === 0,
-    'and lists it apart from the images that were missing');
+  expect(po.channels['Over the embed budget'].count === 1 && po.channels['Collapsed to zero size'].count === 0,
+    'and lists it in its own channel, not among the problems');
   expect(hash(five) === before, 'the source file is untouched');
 
   const both = runJob(job('b-both', { uxml: 'Collapse.uxml', panel: { width: 300, height: 200 }, assets: { 'Art/x.png': five } }));
@@ -360,7 +376,7 @@ console.log('\ncode 3 — ran, no defect, but the budget kept an image out of th
     expect(r.code === 2 && /assetBudget/.test(r.out), `a budget that is ${what} → 2, refused by name (got ${r.code})`);
   }
 
-  mutate('scripts/preview.mjs', 'const over = (why) => overBudget.push(', 'const over = (why) => assetSkipped.push(', () =>
+  mutate('src/check.js', "    var overBudget = meta.overBudget || [];\n", "    var overBudget = meta.overBudget || [];\n    overBudget.forEach(function (a) { push('over budget: ' + a.path); });\n", () =>
     expect(runJob(TMP + 'b-over.json').code === 1, 'mutation (over budget counted as a problem) → the 3 case becomes 1'));
   mutate('src/check.js', 'code: problems.length ? 1 : overBudget.length ? 3 : 0', 'code: overBudget.length ? 3 : problems.length ? 1 : 0', () =>
     expect(runJob(TMP + 'b-both.json').code === 3, 'mutation (3 outranks 1) → the defect case becomes 3'));

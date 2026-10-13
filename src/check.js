@@ -523,8 +523,9 @@
    *          code and the page turns it into its verdict line, so the two
    *          cannot reach different conclusions from the same run.
    * Requires: `meta` carries what only the host could see — sheets and
-   *           templates it could not read, assets it could not find, and
-   *           assets it would not embed because of the budget.
+   *           templates it could not read, and assets it would not embed
+   *           because of the budget. A missing asset file never gets here: the
+   *           host refuses the job instead.
    * Ensures: code 1 when `problems` is non-empty — a defect in the document
    *          or in what was given to judge it; otherwise 3 when the budget
    *          kept an image out, which makes the preview incomplete but says
@@ -555,7 +556,6 @@
     res.collapsed.forEach(function (c) { push('<' + c.type + '> #' + c.name + ' has no size and is invisible'); });
     res.overflow.forEach(function (c) { push('<' + c.type + '> #' + c.name + ' runs outside the panel'); });
     res.other.forEach(function (x) { push(x.kind + ': ' + x.message); });
-    (meta.assetSkipped || []).forEach(function (a) { push('asset not embedded — ' + a.path + ': ' + a.why); });
     var overBudget = meta.overBudget || [];
     return { problems: problems, overBudget: overBudget, code: problems.length ? 1 : overBudget.length ? 3 : 0 };
   }

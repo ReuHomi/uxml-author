@@ -331,11 +331,6 @@
       'incomplete.',
       misses, function (m) { return '<code>' + esc(m.key) + '</code>'; });
 
-    var skipped = (UXML_INPUT.meta && UXML_INPUT.meta.assetSkipped) || [];
-    channel('problem', 'Images left out of the embed',
-      'The file named in the job was not there. Dropping one quietly would read as a broken path.',
-      skipped, function (a) { return '<code>' + esc(a.path) + '</code> \u2014 ' + esc(a.why); });
-
     var overBudget = (UXML_INPUT.meta && UXML_INPUT.meta.overBudget) || [];
     channel('budget', 'Over the embed budget',
       'Not a problem with the screen: these images were too large to embed, so this preview ' +
