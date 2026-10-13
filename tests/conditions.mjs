@@ -467,7 +467,7 @@ const refusal = (C, extra) => C.checkStates(core, useInput(extra)).errors.join('
   expect(refusal(C, { states: { '#Use': ['hovr'] } }) === '', 'mutation (no allow-list) → a mistyped state is accepted');
 }
 {
-  const C = loadCheck((x) => x.replace("        else if (!hit.has(PROBE_PROP + i)) errors.push(", "        else if (false) errors.push("));
+  const C = loadCheck((x) => x.replace("        else if (!hit.has(PROBE_PROP + i)) {", "        else if (false) {"));
   expect(refusal(C, { states: { '#Nope': ['hover'] } }) === '', 'mutation (no match check) → a key matching nothing is accepted');
 }
 {
@@ -490,6 +490,89 @@ const refusal = (C, extra) => C.checkStates(core, useInput(extra)).errors.join('
   const res = C.run(core, stage(), inp);
   expect(res.depsRequested.some((d) => /probe/.test(d)), 'mutation (probe leaks into the real parse) → the isolation case catches it');
   res.dispose();
+}
+
+section('K — the probe passes a states key exactly when the renderer applies it');
+// Measured, not assumed. The core matches a states key with no state at all
+// in scope — neither activeStates nor the `disabled` an `enabled="false"`
+// attribute gives — so a key that itself needs a state never selects anything
+// there. A probe that disagreed would pass a key the renderer then ignores, and
+// the run would report a state it never drew. Each row asks both sides.
+const UXML_EN = `<ui:UXML xmlns:ui="UnityEngine.UIElements"><Style src="E.uss" />
+<ui:VisualElement name="Panel">
+  <ui:Button name="Use" text="Use" enabled="false" />
+  <ui:VisualElement name="Parent" enabled="false"><ui:VisualElement name="Child" /></ui:VisualElement>
+  <ui:VisualElement name="Free" />
+</ui:VisualElement></ui:UXML>`;
+// `checked` is the marker state: nothing else in these documents puts it on an
+// element, so a 141px width can only mean the renderer applied the key.
+const EN_USS = `#Panel { width: 380px; height: 280px; }
+#Use, #Child, #Free { width: 80px; height: 20px; }
+#Use:checked, #Child:checked, #Free:checked { width: 141px; }
+*:checked { --applied: 1; }`;
+const EN_CASES = [
+  ['#Use', []], ['#Use:disabled', []], ['#Use:disabled', ['disabled']],
+  ['#Child:disabled', []], ['#Child:disabled', ['disabled']],
+  ['#Parent:disabled #Child', []], ['#Parent:disabled #Child', ['disabled']],
+  ['#Free:disabled', []], ['#Free:disabled', ['disabled']],
+  ['#Use:hover', []], ['#Use:hover', ['hover']],
+  ['#Use:enabled', []], ['#Free:enabled', []], ['#Free:enabled', ['enabled']],
+  [':root', []], [':root', ['hover']],
+  ['#Parent #Child', []], ['#Parent #Child', ['disabled']], ['Button', ['disabled']],
+];
+function rendererApplies(key, active) {
+  const doc = core.expandTemplates(core.parse(UXML_EN, undefined, { resolveImport: () => EN_USS })).document;
+  const opts = { activeStates: new Set(active), states: { [key]: ['checked'] } };
+  const r = core.render(doc, stage(), { size: PANEL, ...opts });
+  const nm = new Map();
+  (function walk(n) { const a = n.attributes.find((x) => x.name === 'name'); nm.set(n.id, a ? a.value : '(root)'); n.children.forEach(walk); })(doc.root);
+  const byBox = [...r.boxes].filter(([, b]) => b.width === 141).map(([id]) => nm.get(id));
+  const byStyle = [];
+  core.resolveStyles(doc, opts).styles.forEach((m, id) => {
+    const v = m.get('--applied');
+    if (v && v.origin.kind === 'rule') byStyle.push(nm.get(id));
+  });
+  r.dispose();
+  return { byBox, byStyle };
+}
+function probeTable(C) {
+  return EN_CASES.map(([key, active]) => {
+    const st = C.checkStates(core, { uxml: UXML_EN, sheets: { 'E.uss': EN_USS }, states: { [key]: ['checked'] }, activeStates: active });
+    const { byBox, byStyle } = rendererApplies(key, active);
+    return { key, active, passed: st.errors.length === 0, applied: byStyle.length > 0, byBox, byStyle, why: st.errors.join('; ') };
+  });
+}
+{
+  const rows = probeTable(loadCheck());
+  rows.forEach((r) => {
+    const label = `${r.key}${r.active.length ? ' with activeStates ' + r.active.join(',') : ''}`;
+    expect(r.passed === r.applied,
+      `${label}: probe ${r.passed ? 'passes' : 'refuses'}, renderer ${r.applied ? 'applies on ' + r.byStyle.join(',') : 'applies nothing'}`);
+  });
+  // The width check is the drawn result; the cascade check also covers the
+  // root, which has no width rule. They must name the same sized elements.
+  expect(rows.every((r) => r.byBox.join() === r.byStyle.filter((n) => n !== '(root)').join()),
+    'the two ways of telling "applied" agree on every row');
+  expect(rows.some((r) => r.passed) && rows.some((r) => !r.passed), 'and the table has both outcomes, so it is not vacuous');
+  const hint = rows.find((r) => r.key === '#Use:disabled' && r.active.length === 0).why;
+  expect(/a state pseudo-class in the key itself never matches/.test(hint), 'a refused key with a state in it says why: ' + hint);
+  expect(!/pseudo-class/.test(refusal(loadCheck(), { states: { '#Nope': ['hover'] } })),
+    'a plain miss does not get that explanation');
+}
+{
+  // mutation: the probe applies the job's activeStates, as it did before
+  const C = loadCheck((x) => x.replace('core.resolveStyles(probeDoc, { activeStates: new Set(), states: {} })',
+    'core.resolveStyles(probeDoc, { activeStates: activeSet, states: {} })'));
+  const bad = probeTable(C).filter((r) => r.passed !== r.applied).map((r) => r.key + '+' + r.active.join(','));
+  expect(bad.includes('#Use:hover+hover') && bad.includes('#Free:disabled+disabled'),
+    'mutation (probe sees activeStates) → it passes keys the renderer ignores: ' + bad.join(' '));
+}
+{
+  // mutation: the `enabled` attribute is left on the probe copy
+  const C = loadCheck((x) => x.replace('        stripEnabled(probeDoc.root);\n', ''));
+  const bad = probeTable(C).filter((r) => r.passed !== r.applied).map((r) => r.key + '+' + r.active.join(','));
+  expect(bad.includes('#Use:disabled+') && bad.includes('#Child:disabled+') && bad.includes('#Parent:disabled #Child+'),
+    'mutation (probe keeps enabled="false") → it passes keys aimed at disabled elements: ' + bad.join(' '));
 }
 
 section('H — no silent default panel size');

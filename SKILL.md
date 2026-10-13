@@ -118,6 +118,10 @@ judge the screen as it looks in one of those states, name it in the job:
 ```
 
 `states` maps a USS selector to the states the elements it matches are in.
+The selector picks elements as they are before any state is applied, so it
+must not itself contain a state: `"#UseButton"`, not `"#UseButton:disabled"` —
+the second matches nothing, even on a button with `enabled="false"`, and is
+refused.
 `activeStates` is a plain list of states every element is in at once, such as
 `["disabled"]`. Both are optional; leave them out and nothing changes. The
 names are Unity's own pseudo-classes — `hover`, `active`, `inactive`, `focus`,

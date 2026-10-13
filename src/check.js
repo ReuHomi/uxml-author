@@ -129,6 +129,13 @@
   var PROBE_SHEET = '__uxml-author-state-probe__.uss';
   var PROBE_PROP = '--uxml-author-state-probe-';
   var ROOT_OPEN = /<([A-Za-z_][\w.-]*:)?UXML\b[^>]*>/;
+  // A pseudo-class other than :root — the ones that name a state.
+  var STATE_IN_KEY = /:(?!root\b)[A-Za-z-]/;
+
+  function stripEnabled(node) {
+    node.attributes = node.attributes.filter(function (a) { return a.name !== 'enabled'; });
+    for (var i = 0; i < node.children.length; i++) stripEnabled(node.children[i]);
+  }
 
   function stateList(value, where, errors) {
     if (!Array.isArray(value)) {
@@ -208,8 +215,18 @@
         var text = String(input.uxml).replace(ROOT_OPEN, function (m) {
           return /\/>$/.test(m) ? m : m + '<Style src="' + PROBE_SHEET + '" />';
         });
-        // Only the global states, as the core uses when it matches a states key.
-        core.resolveStyles(parseWith(text, extra), { activeStates: activeSet, states: {} }).styles.forEach(function (m) {
+        // The probe must see exactly what the core's states-key matching sees,
+        // and that is NO state at all. Measured on uxml-preview 0.5.0: the core
+        // matches each key in a context whose `statesOf` returns a fresh empty
+        // Set — not `activeStates`, and not the `disabled` an `enabled="false"`
+        // attribute gives a subtree. So "#Use:disabled" or "#Use:hover" never
+        // selects anything there, whatever else the job asks for. A probe
+        // that applied those states would pass keys the renderer then
+        // ignores, and the run would report a state it never drew. Hence: no
+        // active states, and the `enabled` attribute removed from this copy.
+        var probeDoc = parseWith(text, extra);
+        stripEnabled(probeDoc.root);
+        core.resolveStyles(probeDoc, { activeStates: new Set(), states: {} }).styles.forEach(function (m) {
           m.forEach(function (v, prop) {
             if (prop.indexOf(PROBE_PROP) === 0 && v.origin && v.origin.kind === 'rule') hit.add(prop);
           });
@@ -217,7 +234,12 @@
       }
       keys.forEach(function (k, i) {
         if (refused.has(k)) errors.push('states key ' + JSON.stringify(k) + ' is not a usable USS selector');
-        else if (!hit.has(PROBE_PROP + i)) errors.push('states key ' + JSON.stringify(k) + ' matches no element in the document');
+        else if (!hit.has(PROBE_PROP + i)) {
+          errors.push('states key ' + JSON.stringify(k) + ' matches no element in the document' +
+            (STATE_IN_KEY.test(k)
+              ? ' — a key is matched before any state is applied, so a state pseudo-class in the key itself never matches; select the element without it'
+              : ''));
+        }
       });
     }
 
