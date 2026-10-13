@@ -223,8 +223,14 @@ section('paths work off Windows drive letters');
   // that. Unity development is largely a Windows activity, so this is a plain
   // portability requirement rather than an edge case, and it cannot be tested
   // from Linux — the check is on the shape of the code instead.
-  const sources = ['scripts/preview.mjs', 'scripts/bind-csharp.mjs', 'scripts/build-core-bundle.mjs',
-                   'tests/conditions.mjs', 'tests/exitcodes.mjs', 'tests/binding.mjs', 'tests/docs.mjs'];
+  // Every .mjs under scripts/ and tests/, read off the disk rather than kept
+  // as a list here. The list this replaced was written by hand and had already
+  // missed tests/page-verdict.mjs when that file was added; a check that only
+  // covers the files someone remembered to name protects exactly those.
+  const sources = ['scripts', 'tests'].flatMap((d) =>
+    readdirSync(ROOT + d).filter((f) => f.endsWith('.mjs')).sort().map((f) => d + '/' + f));
+  expect(sources.includes('tests/page-verdict.mjs') && sources.includes('scripts/preview.mjs'),
+    `the scan finds the files, including ones added later: ${sources.length} files`);
   sources.forEach((f) => {
     const src = readFileSync(ROOT + f, 'utf8');
     expect(!/import\.meta\.url\s*\)\s*\.pathname/.test(src),
