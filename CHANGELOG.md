@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.2.1 — 2026-10-13
+
+Moves to uxml-preview 0.5.1, which says what each warning is about. The
+check now sorts warnings by that instead of by their kind.
+
+### Behaviour changes
+
+Read these first if anything acts on the exit code of `scripts/preview.mjs`.
+
+- **Exit 3 also means "a property was not laid out".** It used to mean only
+  that an image was over the embed budget. It now means the check ran, found
+  no defect, and the preview may differ from Unity: an image over the budget,
+  or valid USS that changes size or position in Unity and that this preview
+  does not lay out, such as `aspect-ratio`. A screen that used one of those
+  and exited 0 now exits 3. Zero-size and overflow findings next to such a
+  property say they come from this preview's layout.
+- **Valid USS this preview does not draw no longer fails a screen.** 0.5.1
+  reports properties it used to skip in silence, such as `text-shadow` and
+  `transition`. They are listed as *not drawn by this preview* and leave the
+  exit code alone, so a correct screen that uses them exits 0.
+- **USS that does not exist still fails, and now says what to write.** A
+  misspelt or CSS-only property (`colour`, `font-family`, `gap`) or a value
+  that cannot work (`display: grid`) exits 1, as before. Where USS has another
+  name, the report gives it.
+- **More is reported than before**, because 0.5.1 is less silent: state
+  pseudo-classes Unity does not have (`:selected`), `@media` and `@keyframes`
+  blocks, and the like now appear, as defects (exit 1).
+- **Things that are ignored in Unity too** (`:root` in a template sheet) are
+  listed as *ignored here and in Unity* and need nothing.
+- A warning whose `reason` or `subject` this version does not recognise —
+  the core may add new ones — fails the run instead of being filed where it
+  could be missed.
+
+### Other changes
+
+- The core bundle is rebuilt from uxml-preview 0.5.1. `<Bindings>` and
+  `<ui:Columns>` are no longer laid out, which is where Unity puts them (see
+  the core's changelog).
+- A `states` key the renderer refuses is recognised by the warning's data
+  (`subject.kind: 'states-key'`), no longer by its wording.
+- The list of Unity states is the core's `USS_STATES`; the copy kept here is
+  gone.
+- `SKILL.md` tells the agent what to do with each kind of warning: fix what
+  is not USS, keep correct USS the preview does not draw, do nothing for what
+  Unity ignores too, never call a code-3 result Unity's, and do not aim for a
+  report with no warnings.
+
 ## 0.2.0 — 2026-10-13
 
 Answers the three issues in the external report of 2026-10-10: hidden elements
