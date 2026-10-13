@@ -72,8 +72,8 @@ section('the documented job examples actually run');
   expect(sCode === 0, 'the documented states job runs clean too — its selector matches and its states are Unity\'s');
 
   // The documented list of state names is the list the check enforces.
-  await import(pathToFileURL(ROOT + 'src/check.js').href);
-  const allowed = globalThis.UxmlCheck.UNITY_STATES;
+  await import(pathToFileURL(ROOT + 'src/core.bundle.js').href);
+  const allowed = globalThis.UxmlCore.USS_STATES;
   const para = SKILL.slice(SKILL.indexOf("The\nnames are Unity's own pseudo-classes"));
   const listed = [...para.slice(0, para.indexOf('\n\n')).matchAll(/`(\w+)`/g)].map((m) => m[1]);
   expect(listed.length === allowed.length && listed.every((n) => allowed.includes(n)),

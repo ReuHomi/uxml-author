@@ -116,16 +116,13 @@
     return { resolve: resolve, requested: requested, missing: missing, ambiguous: ambiguous };
   }
 
-  // The states a Unity element can be in, as USS pseudo-classes.
-  // Source: Unity Manual, "USS selectors: Pseudo-classes"
-  //   https://docs.unity3d.com/Manual/UIE-USS-Selectors-Pseudo-Classes.html
-  // `:root` is left out because it names a place in the tree, not a state —
-  // the core matches it structurally and ignores it in a state list. `:selected`
-  // is left out because that page says USS does not support it. Anything else
-  // is a name Unity will never put on an element, so a rule written for it can
-  // never match there, and a preview that applied it would show a screen that
-  // cannot exist.
-  var UNITY_STATES = ['hover', 'active', 'inactive', 'focus', 'disabled', 'enabled', 'checked'];
+  // The states a Unity element can be in are the core's USS_STATES (0.5.1+),
+  // transcribed there from Unity's pseudo-class page without `:root` (a place
+  // in the tree, not a state) and `:selected` (USS does not support it). This
+  // file kept its own copy until the core exported one; a second copy is a
+  // second place to forget when Unity adds a state. Anything outside the list
+  // is a name Unity never puts on an element, so a preview that applied it
+  // would show a screen that cannot exist.
   var PROBE_SHEET = '__uxml-author-state-probe__.uss';
   var PROBE_PROP = '--uxml-author-state-probe-';
   var ROOT_OPEN = /<([A-Za-z_][\w.-]*:)?UXML\b[^>]*>/;
@@ -137,7 +134,7 @@
     for (var i = 0; i < node.children.length; i++) stripEnabled(node.children[i]);
   }
 
-  function stateList(value, where, errors) {
+  function stateList(value, where, errors, allowed) {
     if (!Array.isArray(value)) {
       // A string is iterable, and the core would quietly apply "h", "o", "v",
       // "e", "r" — none of which matches anything. Refused by name for that reason.
@@ -147,9 +144,9 @@
     }
     var ok = true;
     value.forEach(function (n) {
-      if (typeof n !== 'string' || UNITY_STATES.indexOf(n) === -1) {
+      if (typeof n !== 'string' || allowed.indexOf(n) === -1) {
         errors.push(where + ' names ' + JSON.stringify(n) + ', which is not a Unity state; use one of ' +
-          UNITY_STATES.join(', '));
+          allowed.join(', '));
         ok = false;
       }
     });
@@ -169,6 +166,7 @@
    */
   function checkStates(core, input) {
     var errors = [];
+    var allowed = Array.prototype.slice.call(core.USS_STATES);
     var rawStates = input.states === undefined ? {} : input.states;
     var rawActive = input.activeStates === undefined ? [] : input.activeStates;
     var states = {};
@@ -181,11 +179,11 @@
           errors.push('states key ' + JSON.stringify(key) + ' is not a selector');
           return;
         }
-        var list = stateList(rawStates[key], 'states[' + JSON.stringify(key) + ']', errors);
+        var list = stateList(rawStates[key], 'states[' + JSON.stringify(key) + ']', errors, allowed);
         if (list) states[key] = list;
       });
     }
-    var active = stateList(rawActive, 'activeStates', errors) || [];
+    var active = stateList(rawActive, 'activeStates', errors, allowed) || [];
     var activeSet = new Set(active);
 
     var keys = Object.keys(states);
@@ -194,18 +192,18 @@
         var res = makeResolver(input.sheets || {}, input.templates || {}, extra);
         return core.expandTemplates(core.parse(text, undefined, { resolveImport: res.resolve })).document;
       };
-      // First, which keys the core itself refuses as selectors. Its warning for
-      // one carries no `at`: it comes from the job, not from a sheet. A
-      // document's own unsupported selector always has one, and keeps its old
-      // channel. A refused key is left out of the probe below, where its text
-      // could otherwise spoil the rules around it.
+      // First, which keys the core itself refuses as selectors. Since 0.5.1 the
+      // core says so as data — `subject: { kind: 'states-key', key }` — so the
+      // key is read off the warning instead of matched against its wording,
+      // which the core may change in any release. A document's own unsupported
+      // selector has a `selector` subject and keeps its old channel. A refused
+      // key is left out of the probe below, where its text could otherwise
+      // spoil the rules around it.
       var refused = new Set();
       core.resolveStyles(parseWith(String(input.uxml), null), { activeStates: activeSet, states: states })
         .warnings.forEach(function (w) {
-          if (w.kind !== 'unsupported-selector' || w.at !== undefined) return;
-          keys.forEach(function (k) {
-            if (w.message.indexOf('states key "' + k + '"') === 0) refused.add(k);
-          });
+          var subj = w.subject;
+          if (subj && subj.kind === 'states-key' && Object.prototype.hasOwnProperty.call(states, subj.key)) refused.add(subj.key);
         });
       var usable = keys.filter(function (k) { return !refused.has(k); });
       var hit = new Set();
@@ -562,6 +560,6 @@
 
   globalThis.UxmlCheck = {
     run: run, judge: judge, resolveSheetUrl: resolveSheetUrl,
-    checkStates: checkStates, describeStates: describeStates, UNITY_STATES: UNITY_STATES,
+    checkStates: checkStates, describeStates: describeStates,
   };
 })();

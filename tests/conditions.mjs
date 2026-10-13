@@ -422,6 +422,18 @@ const layout = (res) => JSON.stringify(res.boxes.map((b) => [b.name, b.box]));
 }
 const refusal = (C, extra) => C.checkStates(core, useInput(extra)).errors.join(' | ');
 {
+  // The allow-list is the core's, not a copy kept here. A copy is a second
+  // place to forget when Unity adds a state.
+  expect(!/\[\s*'hover',\s*'active'/.test(CHECK_SRC), 'check.js holds no copy of the state list');
+  const more = { ...core, USS_STATES: [...core.USS_STATES, 'future-state'] };
+  expect(loadCheck().checkStates(more, useInput({ states: { '#Use': ['future-state'] } })).errors.length === 0,
+    'a state the core adds is accepted without touching check.js');
+  const Pinned = loadCheck((x) => x.replace('var allowed = Array.prototype.slice.call(core.USS_STATES);',
+    "var allowed = ['hover', 'active', 'inactive', 'focus', 'disabled', 'enabled', 'checked'];"));
+  expect(Pinned.checkStates(more, useInput({ states: { '#Use': ['future-state'] } })).errors.length > 0,
+    'mutation (a pinned copy again) → the new state is refused, so the case above catches it');
+}
+{
   const C = loadCheck();
   const cases = [
     [{ states: { '#Use': 'hover' } }, /must be an array.*the string "hover"/, 'a string where an array belongs'],
@@ -463,7 +475,7 @@ const refusal = (C, extra) => C.checkStates(core, useInput(extra)).errors.join('
     'mutation (no array check) → the string is split into letters and the refusal no longer says why: ' + e);
 }
 {
-  const C = loadCheck((x) => x.replace("typeof n !== 'string' || UNITY_STATES.indexOf(n) === -1", "typeof n !== 'string'"));
+  const C = loadCheck((x) => x.replace("typeof n !== 'string' || allowed.indexOf(n) === -1", "typeof n !== 'string'"));
   expect(refusal(C, { states: { '#Use': ['hovr'] } }) === '', 'mutation (no allow-list) → a mistyped state is accepted');
 }
 {
@@ -471,14 +483,35 @@ const refusal = (C, extra) => C.checkStates(core, useInput(extra)).errors.join('
   expect(refusal(C, { states: { '#Nope': ['hover'] } }) === '', 'mutation (no match check) → a key matching nothing is accepted');
 }
 {
-  const C = loadCheck((x) => x.replace("if (w.kind !== 'unsupported-selector' || w.at !== undefined) return;", 'return;'));
+  const READ = "if (subj && subj.kind === 'states-key' && Object.prototype.hasOwnProperty.call(states, subj.key)) refused.add(subj.key);";
+  const C = loadCheck((x) => x.replace(READ, ''));
   const e = refusal(C, { states: { '#Use[x]': ['hover'] } });
   expect(!/not a usable USS selector/.test(e), 'mutation (core refusal not read) → the unusable key is misdescribed: ' + e);
 }
 {
+  // The refusal reads the core's `subject`, not its message. A core that
+  // rewords every warning — which 0.5.1 says it may do in any release — must
+  // still have its refusal of a states key noticed.
+  const reworded = {
+    ...core,                                // the core's exports are getters; copy their values
+    resolveStyles: (doc, opts) => {
+      const out = core.resolveStyles(doc, opts);
+      return { ...out, warnings: out.warnings.map((w) => ({ ...w, message: 'reworded by a future core' })) };
+    },
+  };
+  const e = loadCheck().checkStates(reworded, useInput({ states: { '#Use[x]': ['hover'] } })).errors.join(' | ');
+  expect(/"#Use\[x\]" is not a usable USS selector/.test(e), 'with every core message reworded, the unusable key is still refused by its subject');
+  // mutation: go back to matching the wording
+  const ByText = loadCheck((x) => x.replace(
+    "if (subj && subj.kind === 'states-key' && Object.prototype.hasOwnProperty.call(states, subj.key)) refused.add(subj.key);",
+    "keys.forEach(function (k) { if (w.message.indexOf('states key \"' + k + '\"') === 0) refused.add(k); });"));
+  const e2 = ByText.checkStates(reworded, useInput({ states: { '#Use[x]': ['hover'] } })).errors.join(' | ');
+  expect(!/not a usable USS selector/.test(e2), 'mutation (match the message text again) → the reworded core slips past, so the case above catches it');
+}
+{
   const C = loadCheck((x) => x.replace("if (st.errors.length) throw new Error(", "if (false) throw new Error("));
   const res = C.run(core, stage(), useInput({ states: { '#Use[x]': ['hover'] } }));
-  expect(res.other.some((w) => /states key/.test(w.message)),
+  expect(res.other.some((w) => w.subject && w.subject.kind === 'states-key' && w.subject.key === '#Use[x]'),
     "mutation (run() does not refuse) → the job's bad key lands among the document's own warnings");
   res.dispose();
 }
