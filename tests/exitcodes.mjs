@@ -44,6 +44,15 @@ function job(name, obj) {
   return p;
 }
 const goodJob = TMP + 'demo/job.json';
+function runJob(jobPath) {
+  try { return { code: 0, out: execFileSync('node', [ROOT + 'scripts/preview.mjs', jobPath], { encoding: 'utf8', stdio: 'pipe' }) }; }
+  catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
+}
+// What the page a person opens decided, read by actually running it.
+function pageOf(name) {
+  return JSON.parse(execFileSync('node', [ROOT + 'tests/page-verdict.mjs', TMP + '../out/' + name + '.html'],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
+}
 
 console.log('\ncode 0 — gate ran, clean');
 expect(exitOf(goodJob) === 0, 'the demo passes');
@@ -78,6 +87,42 @@ writeFileSync(TMP + 'NoSheet.uxml',
    <ui:VisualElement name="Box" /></ui:UXML>`);
 expect(exitOf(job('nosheet', { uxml: 'NoSheet.uxml', panel: { width: 300, height: 200 } })) === 1,
   'an unreadable stylesheet → 1 (wrong coordinates, not merely missing style)');
+
+console.log('\nhidden is reported, never counted');
+{
+  // The external report's fixture, verbatim.
+  writeFileSync(TMP + 'Report.uxml', `<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <ui:VisualElement name="Hidden" style="display:none;width:80px;height:40px">
+        <ui:VisualElement name="Child" style="width:20px;height:10px" />
+    </ui:VisualElement>
+</ui:UXML>`);
+  const r = runJob(job('report', { uxml: 'Report.uxml', panel: { width: 300, height: 200 } }));
+  expect(r.code === 0, `display: none on a parent and its child → 0 (got ${r.code})`);
+  expect(/hidden by display: none \(2\)/.test(r.out) && /#Hidden — itself, by inline style attribute/.test(r.out) &&
+    /#Child — inside #Hidden/.test(r.out), 'and both are listed, with what hid them');
+  const pg = pageOf('report');
+  expect(/^Pass/.test(pg.verdict), 'the page agrees: ' + pg.verdict);
+  expect(pg.channels['Hidden by display: none'].count === 2, 'and lists the same two as hidden');
+  expect(pg.channels['Collapsed to zero size'].count === 0, 'and none as collapsed');
+
+  writeFileSync(TMP + 'Styles/E.uss', '.gone { display: none; } .sized { width: 20px; height: 20px; }');
+  writeFileSync(TMP + 'Emptied.uxml', `<ui:UXML xmlns:ui="UnityEngine.UIElements"><Style src="Styles/E.uss" />
+    <ui:VisualElement name="Tabs"><ui:VisualElement name="Page" class="gone sized" /></ui:VisualElement></ui:UXML>`);
+  const e = runJob(job('emptied', { uxml: 'Emptied.uxml', panel: { width: 300, height: 200 } }));
+  expect(e.code === 0, `a container emptied by hidden children → 0 (got ${e.code})`);
+  expect(/emptied by hidden children \(1\)/.test(e.out) && /#Tabs/.test(e.out) &&
+    /check the rules that hide its children/.test(e.out), 'and it is listed with a prompt to confirm it was meant');
+  const pe = pageOf('emptied');
+  expect(/^Pass/.test(pe.verdict) && pe.channels['Emptied by hidden children'].count === 1, 'the page agrees');
+
+  writeFileSync(TMP + 'Mixed.uxml', `<ui:UXML xmlns:ui="UnityEngine.UIElements"><Style src="Styles/E.uss" />
+    <ui:VisualElement name="Box"><ui:VisualElement name="Page" class="gone sized" /><ui:Image name="Loose" /></ui:VisualElement></ui:UXML>`);
+  const m = runJob(job('mixed', { uxml: 'Mixed.uxml', panel: { width: 300, height: 200 } }));
+  expect(m.code === 1, `a visible zero-size child next to a hidden one → 1 (got ${m.code})`);
+  const pm = pageOf('mixed');
+  expect(!/^Pass/.test(pm.verdict) && pm.channels['Collapsed to zero size'].count === 2,
+    'and the page does not pass it either: ' + pm.verdict);
+}
 
 console.log('\nG — the cap is never silent');
 {

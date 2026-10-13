@@ -115,7 +115,7 @@ prevent.
 
 ## Reading the report
 
-Four of the channels mean different things and must not be flattened together.
+The channels mean different things and must not be flattened together.
 
 **Not drawn by this version.** `Toggle`, `Slider`, `TextField` and other
 controls the renderer has no drawing for fall back to a plain element, which
@@ -149,7 +149,25 @@ constraint on the code, never as a broken screen.
 
 **Collapsed to zero size.** A failure that raises no warning at all. Usually a
 `<ui:Image>` with no size in the USS, or a container whose children could not
-give it a height. Always fix these.
+give it a height. Fix these — but only these. Zero size has two other causes
+that are not defects, and they are reported apart so they are never "fixed"
+by accident:
+
+**Hidden by `display: none`.** The element, or one of its ancestors, is
+`display: none` in the final applied style — a USS class, a pseudo-state such
+as `:hover`, or an inline `style` all count. A deliberate state, so it never
+changes the exit code. It is still always listed, with the rule that did it,
+because a mistyped class hides an element just as well as an intended one. Read
+the list and confirm each entry is meant; pass on any you cannot vouch for.
+`opacity: 0` and `visibility: hidden` are not part of this: such an element
+keeps its size and is judged like any other.
+
+**Emptied by hidden children.** An element that is shown, has no size of its
+own, and whose children are all hidden (or emptied in turn) — a tab container
+with every page switched off, say. Not a defect and not in the exit code. If it
+is not the state the person meant, the rules hiding its children are where to
+look. An element with an explicit `width: 0` or `height: 0`, or with even one
+visible child, stays in *Collapsed*.
 
 `Measured on Unity 6000.0.40f1` is a standing condition, not an event. It fires
 whenever a control uses theme defaults. Do not treat it as a problem and do not

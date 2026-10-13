@@ -296,8 +296,24 @@
 
     channel('problem', 'Collapsed to zero size',
       'A failure that raises no warning. Nodes already listed above are left out \u2014 the same ' +
-      'fact counted twice is still one fact.',
+      'fact counted twice is still one fact \u2014 and so is anything hidden by ' +
+      '<code>display: none</code>, which has its own list below.',
       res.collapsed, function (c) { return '<code>&lt;' + esc(c.type) + '&gt; #' + esc(c.name) + '</code>'; });
+
+    channel('read', 'Hidden by display: none',
+      'Not a problem and not counted in the verdict. The element, or an ancestor, is ' +
+      '<code>display: none</code> in the final applied style. Listed anyway: a mistyped class ' +
+      'hides things exactly as well as an intended state, and only you can tell which.',
+      res.hidden, function (h) {
+        return '<code>&lt;' + esc(h.type) + '&gt; #' + esc(h.name) + '</code> \u2014 ' +
+          (h.by.self ? 'itself' : 'inside <code>#' + esc(h.by.name || '(unnamed ' + h.by.type + ')') + '</code>') +
+          ', by ' + esc(h.origin);
+      });
+
+    channel('read', 'Emptied by hidden children',
+      'Zero size only because every child it has is hidden. Not counted in the verdict. If this ' +
+      'is not the state you meant, check the rules that hide its children.',
+      res.emptied, function (c) { return '<code>&lt;' + esc(c.type) + '&gt; #' + esc(c.name) + '</code>'; });
 
     channel('problem', 'Outside the panel',
       'Measured against ' + panel.width + ' \u00d7 ' + panel.height + '.',
@@ -334,6 +350,7 @@
                   res.painted.elementCount === res.painted.boxCount &&
                   res.painted.childCount > 0;
     var clean = res.collapsed.length === 0 && res.overflow.length === 0 &&
+                res.cascadeMismatch.length === 0 &&
                 res.other.length === 0 && misses.length === 0 && skipped.length === 0;
 
     if (!painted) {

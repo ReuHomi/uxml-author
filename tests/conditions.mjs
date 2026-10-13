@@ -192,6 +192,167 @@ section('F — every sheet reaches the coordinates, relative @import included');
   res.dispose();
 }
 
+section('I — display: none is hidden, not collapsed; the rest of zero size still is');
+// The external report's own fixture, verbatim. Before this channel existed
+// both elements were reported collapsed and the run exited 1 on a screen that
+// was exactly what its author wrote.
+const UXML_REPORT = `<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <ui:VisualElement name="Hidden" style="display:none;width:80px;height:40px">
+        <ui:VisualElement name="Child" style="width:20px;height:10px" />
+    </ui:VisualElement>
+</ui:UXML>`;
+const UXML_ZERO = `<ui:UXML xmlns:ui="UnityEngine.UIElements"><Style src="Z.uss" />
+  <ui:Template name="Slot" src="Slot.uxml" />
+  <ui:VisualElement name="Panel">
+    <ui:VisualElement name="ByClass" class="gone"><ui:VisualElement name="ByClassKid" /></ui:VisualElement>
+    <ui:Instance template="Slot" name="SlotA" />
+    <ui:Instance template="Slot" name="SlotB" class="off" />
+    <ui:VisualElement name="Tabs"><ui:VisualElement name="PageOne" class="gone sized" /></ui:VisualElement>
+    <ui:VisualElement name="Outer2"><ui:VisualElement name="Mid"><ui:VisualElement name="Deep" class="gone sized" /></ui:VisualElement></ui:VisualElement>
+    <ui:VisualElement name="Mixed"><ui:VisualElement name="MixedGone" class="gone sized" /><ui:Image name="MixedLoose" /></ui:VisualElement>
+    <ui:Image name="Lone" />
+    <ui:VisualElement name="Zero"><ui:VisualElement name="ZeroKid" class="gone sized" /></ui:VisualElement>
+    <ui:VisualElement name="Outer"><ui:Image name="Inner" /></ui:VisualElement>
+    <ui:Image name="Faded" />
+    <ui:Image name="Invisible" />
+    <ui:Image name="Toggled" class="__TOGGLE__" />
+    <ui:Button name="Use" text="Use" />
+  </ui:VisualElement>
+</ui:UXML>`;
+const ZERO_SHEETS = {
+  'Z.uss': `#Panel { width: 380px; height: 280px; }
+.gone { display: none; }
+.sized { width: 30px; height: 30px; }
+#SlotB .slot { display: none; }
+#Zero { height: 0; }
+#Faded { opacity: 0; }
+#Invisible { visibility: hidden; }
+#Use { width: 80px; height: 30px; }
+#Use:hover { display: none; }`,
+};
+const ZERO_TEMPLATES = {
+  'Slot.uxml': `<ui:UXML xmlns:ui="UnityEngine.UIElements"><ui:VisualElement name="SlotRoot" class="slot" style="width: 40px; height: 20px;" /></ui:UXML>`,
+};
+function zeroRun(C, toggle) {
+  return C.run(core, stage(), {
+    uxml: UXML_ZERO.replace('__TOGGLE__', toggle), sheets: ZERO_SHEETS,
+    templates: ZERO_TEMPLATES, panel: PANEL,
+  });
+}
+const names = (list) => list.map((x) => x.name);
+const hiddenNames = (res) => names(res.hidden);
+{
+  const C = loadCheck();
+  const res = C.run(core, stage(), { uxml: UXML_REPORT, panel: PANEL });
+  expect(hiddenNames(res).join(',') === 'Hidden,Child',
+    `report fixture: Hidden and Child are hidden (got ${hiddenNames(res)})`);
+  expect(res.collapsed.length === 0, `report fixture: nothing collapsed (got ${names(res.collapsed)})`);
+  const child = res.hidden.find((h) => h.name === 'Child');
+  expect(child && !child.by.self && child.by.name === 'Hidden',
+    'the child names the ancestor that hides it');
+  expect(res.hidden[0].origin === 'inline style attribute', `and the cause is named: ${res.hidden[0].origin}`);
+  expect(res.cascadeMismatch.length === 0, 'the render and the style judgement agree');
+  res.dispose();
+}
+{
+  const C = loadCheck();
+  const res = zeroRun(C, 'none');
+  const hid = hiddenNames(res), col = names(res.collapsed), emp = names(res.emptied);
+  expect(hid.includes('ByClass') && hid.includes('ByClassKid'), 'a USS class hides the element and its child');
+  expect(/"\.gone" in Z\.uss/.test(res.hidden.find((h) => h.name === 'ByClass').origin),
+    'and the report names the rule and the sheet: ' + res.hidden.find((h) => h.name === 'ByClass').origin);
+  expect(hid.includes('SlotRoot') && res.hidden.some((h) => h.name === 'SlotRoot' && /#SlotB \.slot/.test(h.origin)),
+    'inside a template instance, a rule in the screen hides the template element');
+  expect(!hid.includes('SlotB') && emp.includes('SlotB'),
+    'and the instance itself is emptied by its hidden child, not hidden and not collapsed');
+  expect(!col.includes('SlotA') && !emp.includes('SlotA') && !hid.includes('SlotA'),
+    'while the other instance of the same template is untouched');
+  expect(emp.includes('Tabs') && !col.includes('Tabs'), 'a container whose only child is hidden is emptied');
+  expect(emp.includes('Mid') && emp.includes('Outer2'), 'emptied propagates: a parent of an emptied child is emptied');
+  expect(col.includes('Mixed') && col.includes('MixedLoose') && !emp.includes('Mixed'),
+    'one visible zero-size child keeps the parent collapsed');
+  expect(col.includes('Lone'), 'no children and no size is collapsed');
+  expect(col.includes('Zero') && !emp.includes('Zero'), 'an explicit height: 0 is collapsed even with only hidden children');
+  expect(col.includes('Outer') && col.includes('Inner'), 'a visible zero-size parent with a zero-size child: both collapsed');
+  expect(col.includes('Faded') && col.includes('Invisible') && !hid.includes('Faded') && !hid.includes('Invisible'),
+    'opacity: 0 and visibility: hidden are not hidden by this rule');
+  expect(col.includes('Toggled'), 'shown, a sizeless Image is collapsed');
+  expect(!hid.includes('Use') && !col.includes('Use'), 'a rule under a pseudo-state that is not active does not hide');
+  expect(res.cascadeMismatch.length === 0, 'the render and the style judgement agree');
+  res.dispose();
+
+  const off = zeroRun(C, 'gone');
+  expect(hiddenNames(off).includes('Toggled') && !names(off.collapsed).includes('Toggled'),
+    'the same Image with the hiding class is hidden instead — the size check comes back the moment it is shown');
+  off.dispose();
+}
+// mutations — each one undoes a judgement the cases above depend on
+{
+  const C = loadCheck((s) => s.replace('      if (hiddenBy.has(id)) {', '      if (false) {'));
+  const res = C.run(core, stage(), { uxml: UXML_REPORT, panel: PANEL });
+  expect(names(res.collapsed).includes('Hidden'), 'mutation (no hidden branch) → the report fixture collapses again');
+  res.dispose();
+}
+{
+  const C = loadCheck((s) => s.replace(
+    "        if (displayNone(p)) { hiddenBy.set(id, p); return; }", ''));
+  const res = C.run(core, stage(), { uxml: UXML_REPORT, panel: PANEL });
+  expect(names(res.collapsed).includes('Child'), 'mutation (no ancestor walk) → the child of a hidden element collapses');
+  res.dispose();
+}
+{
+  const C = loadCheck((s) => s.replace(
+    "      return d && d.value === 'none' ? d.origin : null;",
+    "      return d && d.value === 'none' && d.origin.kind === 'inline' ? d.origin : null;"));
+  const res = zeroRun(C, 'none');
+  expect(names(res.collapsed).includes('ByClass'),
+    'mutation (only an inline style counts) → a USS class no longer hides, so the class case catches it');
+  res.dispose();
+}
+{
+  const C = loadCheck((s) => s.replace(
+    "      return d && d.value === 'none' ? d.origin : null;",
+    "      var v = m && m.get('visibility');\n      if (v && v.value === 'hidden') return v.origin;\n      return d && d.value === 'none' ? d.origin : null;"));
+  const res = zeroRun(C, 'none');
+  expect(hiddenNames(res).includes('Invisible'), 'mutation (visibility: hidden counts) → the visibility case catches it');
+  res.dispose();
+}
+{
+  const C = loadCheck((s) => s.replace("        if (isEmptied(id)) emptied.push(", "        if (false) emptied.push("));
+  const res = zeroRun(C, 'none');
+  expect(names(res.collapsed).includes('Tabs'), 'mutation (no emptied channel) → the emptied container collapses');
+  res.dispose();
+}
+{
+  const C = loadCheck((s) => s.replace('!hiddenBy.has(id) && !explicitZero(id)', '!hiddenBy.has(id)'));
+  const res = zeroRun(C, 'none');
+  expect(names(res.emptied).includes('Zero'), 'mutation (ignore an explicit 0) → height: 0 is explained away as emptied');
+  res.dispose();
+}
+{
+  const C = loadCheck((s) => s.replace('kids.every(function (k)', 'kids.some(function (k)'));
+  const res = zeroRun(C, 'none');
+  expect(names(res.emptied).includes('Mixed'), 'mutation (some child hidden is enough) → a parent with a visible child is emptied');
+  res.dispose();
+}
+{
+  const C = loadCheck((s) => s.replace('|| isEmptied(k); });', '; });'));
+  const res = zeroRun(C, 'none');
+  expect(names(res.collapsed).includes('Outer2'), 'mutation (emptied does not propagate) → the grandparent collapses');
+  res.dispose();
+}
+{
+  // The two cascades are tied together by one options object. Hand the style
+  // judgement different states and the hidden list stops describing the
+  // screen that was drawn — which must be caught, not reported as hidden.
+  const C = loadCheck((s) => s.replace('core.resolveStyles(doc, cascadeOpts)',
+    "core.resolveStyles(doc, { activeStates: new Set(['hover']), states: {} })"));
+  const res = zeroRun(C, 'none');
+  expect(names(res.cascadeMismatch).includes('Use'),
+    'mutation (style judgement given other states) → the mismatch is caught on #Use');
+  res.dispose();
+}
+
 section('H — no silent default panel size');
 {
   const C = loadCheck();

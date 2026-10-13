@@ -12,7 +12,7 @@ way proves nothing.
 
 | Suite | Guards |
 | --- | --- |
-| `conditions` | painting, the collapse channel, injected images, multi-sheet resolution |
+| `conditions` | painting, the collapse channel and what it must not swallow (hidden, emptied), injected images, multi-sheet resolution |
 | `exitcodes` | 0 / 1 / 2 stay distinguishable, including a simulated missing `happy-dom`; assembled screens, a mistyped `element-name`, a missing template, a cyclic graph, slots, package paths |
 | `binding` | determinism, name retirement, renames, the untouched logic file, a repeated name refused before anything is written |
 | `docs` | SKILL.md still describes the code it ships with |
@@ -23,6 +23,10 @@ Notable mutations, and what would slip past without them:
   screen is blank. Found in the browser first, then given a test.
 - **read painting from a snapshot** — the assertion is worded correctly and
   passes over a torn-down container. Only a mutation exposed it.
+- **judge `display: none` from the inline style only** — a USS class or a
+  pseudo-state hides the element on screen while the report calls it collapsed.
+  The class case fails; so does handing the style judgement different states
+  from the render, which the cascade-agreement check catches.
 - **exempt `Image` from the collapse check** — a sizeless image, once supplied,
   raises no warning in any channel.
 - **always write the logic half** — hand-written C# disappears while all other

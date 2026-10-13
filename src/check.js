@@ -38,11 +38,43 @@
     return null;
   }
 
-  function indexNodes(node, map) {
-    map.set(node.id, { type: node.name.local, name: nameOf(node) });
-    for (var i = 0; i < node.children.length; i++) indexNodes(node.children[i], map);
+  // `parent` and `children` are recorded because `display` is not inherited:
+  // the core leaves a hidden element's descendants with no display value of
+  // their own, so whether one of them is shown can only be answered by walking
+  // up the tree ourselves.
+  function indexNodes(node, map, parent) {
+    var kids = [];
+    for (var i = 0; i < node.children.length; i++) kids.push(node.children[i].id);
+    map.set(node.id, { type: node.name.local, name: nameOf(node), parent: parent, children: kids });
+    for (var j = 0; j < node.children.length; j++) indexNodes(node.children[j], map, node.id);
     return map;
   }
+
+  /**
+   * Purpose: say where a `display: none` came from, in words a person can act
+   *          on — the sheet and the selector, or the element's own style
+   *          attribute. A class typo that hides something by accident is only
+   *          findable if the report names the rule that did it.
+   */
+  function describeOrigin(doc, origin) {
+    if (!origin) return 'unknown origin';
+    if (origin.kind === 'inline') return 'inline style attribute';
+    if (origin.kind === 'rule') {
+      var sheet = doc.sheets && doc.sheets[origin.sheet];
+      var item = sheet && sheet.items && sheet.items[origin.item];
+      var where = origin.sourceDocument || (sheet && sheet.origin) || ('sheet ' + origin.sheet);
+      if (item && item.rule && item.rule.selectorSpan && typeof sheet.source === 'string') {
+        var sel = sheet.source.slice(item.rule.selectorSpan.start, item.rule.selectorSpan.end).trim();
+        return '"' + sel + '" in ' + where;
+      }
+      return 'a rule in ' + where;
+    }
+    return origin.kind;
+  }
+
+  // USS lengths that are an explicit zero. An element sized 0 on purpose is a
+  // collapse the author wrote, so it must not be explained away as "emptied".
+  var EXPLICIT_ZERO = /^-?0+(\.0+)?(px|%)?$/;
 
   /**
    * Purpose: one render, turned into the channels a human and a model read.
@@ -57,6 +89,9 @@
    *   - `collapsed` never repeats a node already in `unsupported`. A fallback
    *     control is height 0 by construction; counting it twice inflates the
    *     problem count without adding a fact.
+   *   - `hidden` and `emptied` never repeat a node in `collapsed`, and neither
+   *     is a defect: they are listed so a person can confirm the state was
+   *     meant. `collapsed` keeps everything else of zero size.
    *   - `injected` comes from our own bookkeeping, never from warnings.
    *     Resolving an asset makes the core go quiet, so the one party who knows
    *     an image was supplied for the preview only is us.
@@ -115,7 +150,14 @@
     var expansion = core.expandTemplates(parsed);
     var doc = expansion.document;
 
-    var labels = indexNodes(doc.root, new Map());
+    var labels = indexNodes(doc.root, new Map(), null);
+
+    // One options object for both cascades. The render resolves styles inside
+    // itself and does not hand them back, so the display judgement asks
+    // `resolveStyles` separately — and the two only describe the same screen
+    // if they are given the same states. Sharing the object is what keeps
+    // them from drifting; `cascadeMismatch` below is what catches it if they do.
+    var cascadeOpts = { activeStates: new Set(), states: {} };
 
     var injected = [];
     var r = core.render(doc, container, {
@@ -130,9 +172,10 @@
         }
         return null;
       },
-      activeStates: new Set(),
-      states: {},
+      activeStates: cascadeOpts.activeStates,
+      states: cascadeOpts.states,
     });
+    var resolved = core.resolveStyles(doc, cascadeOpts);
 
     // `version-dependent` is a standing condition, not an event: it fires
     // whenever a themed control is used at all. Counting it as a problem makes
@@ -179,15 +222,82 @@
     // whole regions while still reporting a pass. That is an instrument fault,
     // not a finding, so it gets its own channel and is never merged with the
     // unnamed case.
-    var collapsed = [], overflow = [], unindexed = [];
+    //
+    // Zero size has three different causes, and only one is a defect:
+    //   hidden  — the element or an ancestor is `display: none` in the final
+    //             applied style (USS class, pseudo-state or inline alike). A
+    //             deliberate state, so it never reaches the exit code — but it
+    //             is always listed, because a class typo hides things too.
+    //   emptied — sized only by its children, and every laid-out child is
+    //             hidden or itself emptied. Same standing as hidden.
+    //   collapsed — everything else, including an explicit width/height of 0.
+    // opacity and visibility do not take an element out of layout, so they
+    // are not part of this rule; such an element still has its size.
+    function displayNone(id) {
+      var m = resolved.styles.get(id);
+      var d = m && m.get('display');
+      return d && d.value === 'none' ? d.origin : null;
+    }
+    var hiddenBy = new Map();           // id -> id of the element whose display is none
+    r.boxes.forEach(function (box, id) {
+      var info = labels.get(id);
+      if (!info) return;
+      if (displayNone(id)) { hiddenBy.set(id, id); return; }
+      for (var p = info.parent; p != null; p = labels.get(p) ? labels.get(p).parent : null) {
+        if (displayNone(p)) { hiddenBy.set(id, p); return; }
+      }
+    });
+    function explicitZero(id) {
+      var m = resolved.styles.get(id);
+      return ['width', 'height'].some(function (k) {
+        var v = m && m.get(k);
+        return !!v && EXPLICIT_ZERO.test(String(v.value).trim());
+      });
+    }
+    var emptiedMemo = new Map();
+    function isEmptied(id) {
+      if (emptiedMemo.has(id)) return emptiedMemo.get(id);
+      var info = labels.get(id), box = r.boxes.get(id), out = false;
+      if (info && box && (box.width === 0 || box.height === 0) && !hiddenBy.has(id) && !explicitZero(id)) {
+        var kids = info.children.filter(function (k) { return r.boxes.has(k); });
+        out = kids.length > 0 && kids.every(function (k) { return hiddenBy.has(k) || isEmptied(k); });
+      }
+      emptiedMemo.set(id, out);
+      return out;
+    }
+
+    var collapsed = [], overflow = [], unindexed = [], hidden = [], emptied = [];
     r.boxes.forEach(function (box, id) {
       var info = labels.get(id);
       if (!info) { unindexed.push(id); return; }
       if (!info.name) return;                // unnamed nodes are not a contract surface
       if (excluded.has(id)) return;
-      if (box.width === 0 || box.height === 0) collapsed.push({ id: id, type: info.type, name: info.name, box: box });
+      if (hiddenBy.has(id)) {
+        var by = hiddenBy.get(id), byInfo = labels.get(by) || {};
+        hidden.push({ id: id, type: info.type, name: info.name, box: box,
+                      by: { id: by, type: byInfo.type, name: byInfo.name, self: by === id },
+                      origin: describeOrigin(doc, displayNone(by)) });
+        return;                              // not laid out, so overflow cannot apply either
+      }
+      if (box.width === 0 || box.height === 0) {
+        if (isEmptied(id)) emptied.push({ id: id, type: info.type, name: info.name, box: box });
+        else collapsed.push({ id: id, type: info.type, name: info.name, box: box });
+      }
       if (box.left + box.width > panel.width || box.top + box.height > panel.height) {
         overflow.push({ id: id, type: info.type, name: info.name, box: box });
+      }
+    });
+
+    // The two cascades must agree. The painted element carries `display: none`
+    // exactly when the render's own cascade said so; if `resolveStyles` was
+    // given different states, the two disagree here and the hidden channel
+    // would be describing a screen nobody drew. That is an instrument fault.
+    var cascadeMismatch = [];
+    r.elements.forEach(function (el, id) {
+      var painted = el.style && el.style.display === 'none';
+      if (painted !== !!displayNone(id)) {
+        var info = labels.get(id) || {};
+        cascadeMismatch.push({ id: id, type: info.type, name: info.name });
       }
     });
 
@@ -230,6 +340,9 @@
       repeatedNames: repeatedNames,
       other: other,
       collapsed: collapsed,
+      hidden: hidden,
+      emptied: emptied,
+      cascadeMismatch: cascadeMismatch,
       overflow: overflow,
       unindexed: unindexed,
       injected: injected,

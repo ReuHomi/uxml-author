@@ -186,6 +186,9 @@ if (res.unindexed.length) {
 if (res.ambiguousDeps.length) {
   res.ambiguousDeps.forEach((a) => push(`"${a.url}" names two different documents (${a.was} and ${a.now}); one of them was not loaded`));
 }
+if (res.cascadeMismatch.length) {
+  push(`${res.cascadeMismatch.length} element(s) were painted with a different display than the style judgement saw — the hidden list below describes a screen nobody drew`);
+}
 if (templateMisses.length) push(`${templateMisses.length} template document(s) could not be read — the instances they fill are missing from the screen entirely, not merely unstyled`);
 if (sheetMisses.length) push(`${sheetMisses.length} stylesheet(s) could not be read — the coordinates below are wrong, not merely incomplete`);
 res.collapsed.forEach((c) => push(`<${c.type}> #${c.name} has no size and is invisible`));
@@ -221,6 +224,18 @@ res.unsupported.forEach((x) => L('  - ' + x.message));
     L('  Q<T>() reaches only the first. bind-csharp refuses these names rather than');
     L('  deriving fields that would all point at the same element.');
   }
+}
+
+// Hidden is never a defect and never silent: a class typo hides an element
+// just as well as an intended state does, and only a person can tell which.
+L(`\nhidden by display: none (${res.hidden.length}) — not a problem; check each one is meant to be hidden`);
+res.hidden.forEach((h) => L(`  - <${h.type}> #${h.name} — ` +
+  (h.by.self ? 'itself' : `inside #${h.by.name || '(unnamed ' + h.by.type + ')'}`) + `, by ${h.origin}`));
+
+if (res.emptied.length) {
+  L(`\nemptied by hidden children (${res.emptied.length}) — zero size only because everything inside it is hidden; not a problem`);
+  res.emptied.forEach((e) => L(`  - <${e.type}> #${e.name}`));
+  L('  If that is not the state you meant, check the rules that hide its children.');
 }
 
 if (res.versionDependent.length) {
