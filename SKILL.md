@@ -82,6 +82,14 @@ node scripts/preview.mjs job.json
 Stylesheets are found relative to the UXML and read automatically; `assets` is
 optional and only for images the person supplied.
 
+Images are embedded into the preview within a budget: 4 MB per file and 16 MB
+in total by default, where 1 MB is 1024 × 1024 bytes on disk. A file over it is
+left out of the preview, listed as over budget, and drawn as not yet present;
+the source file is never converted or changed. To include a large background,
+set `"assetBudget": { "perFileMB": 8, "totalMB": 32 }` in the job — either key
+on its own is fine. A value that is not a positive number stops the run with
+code 2.
+
 ```
 node scripts/bind-csharp.mjs bind.json
 ```
@@ -133,9 +141,20 @@ reading it will cost you the conversation for nothing.
 | 0 | ran, clean | carry on |
 | 1 | ran, found something | fix it, or tell the person plainly if you cannot |
 | 2 | **did not run** | nothing checked this output; say so before showing anything |
+| 3 | ran, clean, but the preview is incomplete | an image was over the embed budget; adjust `assetBudget`, not the document |
+
+The codes run 0–3. When several apply, 2 wins over 1, 1 over 3, and 3 over 0:
+a defect alongside an over-budget image is a 1, because the defect is what
+needs a fix.
+
+Code 3 is never about the UXML or USS. Do not edit the screen to make it go
+away — raise the budget, or tell the person the preview draws those images as
+not yet present. The report lists each one with its size and the budget it
+was measured against.
 
 Code 2 usually means `happy-dom` is missing (`npm install happy-dom`) or the
-panel size is absent. The preview HTML still renders in a browser — it needs no
+panel size is absent. It also means the job asked for something that cannot be
+applied — a state or a budget it got wrong — and the message names which. The preview HTML still renders in a browser — it needs no
 Node — but no machine has looked at it. Say that out loud. A file presented as
 if it were checked, when it was not, is the failure this whole tool exists to
 prevent.

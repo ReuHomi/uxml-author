@@ -1,6 +1,7 @@
 // node scripts/bind-csharp.mjs job.json
 //
-// Same exit-code contract as preview.mjs:
+// Same meaning for the codes it shares with preview.mjs; bind uses only 0, 1
+// and 2 — it embeds no images, so preview's code 3 never arises here:
 //   0  ran, nothing needs your attention
 //   1  ran, something needs a change in your C#
 //   2  DID NOT RUN — no contract was reconciled, nothing was written

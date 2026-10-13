@@ -1,5 +1,7 @@
 // The exit code is the contract. 1 and 2 must stay distinguishable:
-// "checked, found a problem" vs "never checked".
+// "checked, found a problem" vs "never checked". 3 is a third thing again:
+// "checked, nothing wrong with the document, but the preview is short of an
+// image the budget kept out" — and it must never hide a 1.
 import { execFileSync, execFileSync as run } from 'node:child_process';
 import { writeFileSync, mkdirSync, renameSync, existsSync, rmSync,
          readdirSync, copyFileSync } from 'node:fs';
@@ -159,9 +161,9 @@ console.log('\nG — the cap is never silent');
     uxml: 'demo/Inventory.uxml', panel: { width: 480, height: 320 },
     assets: { 'Art/potion.png': 'demo/Art/potion.png' },
   });
-  // 0-byte cap is simulated by pointing at a file bigger than the limit is not
-  // possible here, so assert the happy path reports the injection instead, and
-  // that a missing file is reported rather than dropped.
+  // The budget itself is exercised under "code 3" below. Here: the happy path
+  // reports the injection, and a missing file is reported rather than dropped
+  // — and stays a problem, unlike an image the budget left out.
   const p2 = job('capmiss', {
     uxml: 'demo/Inventory.uxml', panel: { width: 480, height: 320 },
     assets: { 'Art/potion.png': 'demo/Art/gone.png' },
@@ -173,6 +175,80 @@ console.log('\nG — the cap is never silent');
     'an asset that could not be embedded says so');
   expect(exitOf(p2) === 1, 'and it counts as a problem, not a shrug');
   expect(exitOf(p) === 0, 'while a good asset passes');
+}
+
+console.log('\ncode 3 — ran, no defect, but the budget kept an image out of the preview');
+{
+  const { readFileSync } = await import('node:fs');
+  const { createHash } = await import('node:crypto');
+  const MB = 1024 * 1024;
+  mkdirSync(TMP + 'big', { recursive: true });
+  // Made here, at run time, so nothing outside the checkout is read and nothing
+  // large is committed. Content is irrelevant to the budget, only size counts.
+  const big = (name, mb) => { const f = TMP + 'big/' + name; writeFileSync(f, Buffer.alloc(Math.round(mb * MB), 7)); return 'big/' + name; };
+  const one = big('one.png', 1), five = big('five.png', 5), three1 = big('three1.png', 3), three2 = big('three2.png', 3), half = big('half.png', 0.5);
+  const hash = (f) => createHash('sha256').update(readFileSync(TMP + f)).digest('hex');
+  const before = hash(five);
+  const inv = { uxml: 'demo/Inventory.uxml', panel: { width: 480, height: 320 } };
+
+  const within = runJob(job('b-within', { ...inv, assets: { 'Art/potion.png': one } }));
+  expect(within.code === 0 && /assets embedded 1/.test(within.out), `a 1 MB image is within the default budget → 0 (got ${within.code})`);
+
+  const over = runJob(job('b-over', { ...inv, assets: { 'Art/potion.png': five } }));
+  expect(over.code === 3, `only a 5 MB image over the 4 MB default per-file budget → 3 (got ${over.code})`);
+  expect(/problems \(0\)/.test(over.out), 'and it is not among the problems');
+  expect(/over the embed budget \(1\)/.test(over.out) && /Art\/potion\.png \(big\/five\.png, 5\.00 MB\): 5\.00 MB is over the 4 MB per-file budget\s+\[budget 4 MB per file, 16 MB total\]/.test(over.out),
+    'it is listed with path, size, reason and the budget applied');
+  const po = pageOf('b-over');
+  expect(/^Incomplete preview/.test(po.verdict) && po.colour === 'var(--blue)', 'the page calls it incomplete, neither pass nor problem: ' + po.verdict);
+  expect(po.channels['Over the embed budget'].count === 1 && po.channels['Images left out of the embed'].count === 0,
+    'and lists it apart from the images that were missing');
+  expect(hash(five) === before, 'the source file is untouched');
+
+  const both = runJob(job('b-both', { uxml: 'Collapse.uxml', panel: { width: 300, height: 200 }, assets: { 'Art/x.png': five } }));
+  expect(both.code === 1, `over the budget and a collapsed element → 1, a defect outranks it (got ${both.code})`);
+  expect(/^Attention/.test(pageOf('b-both').verdict), 'and the page agrees');
+
+  const raised = runJob(job('b-raised', { ...inv, assets: { 'Art/potion.png': five }, assetBudget: { perFileMB: 8 } }));
+  expect(raised.code === 0 && /assets embedded 1/.test(raised.out), `raising perFileMB to 8 embeds it → 0 (got ${raised.code})`);
+  expect(/^Pass/.test(pageOf('b-raised').verdict), 'and the page passes');
+
+  const total = runJob(job('b-total', { ...inv, assetBudget: { totalMB: 5 },
+    assets: { 'Art/potion.png': three1, 'Art/b.png': three2, 'Art/c.png': half } }));
+  expect(total.code === 3, `two 3 MB images against a 5 MB total budget → 3 (got ${total.code})`);
+  expect(/Art\/b\.png .*would bring the embedded total to 6\.00 MB, over the 5 MB total budget \(3\.00 MB already embedded\)/.test(total.out),
+    'the one that did not fit says by how much, against the total');
+  expect(/assets embedded 2/.test(total.out), 'and a smaller file after it still fits — the message no longer claims the cap "was reached"');
+
+  for (const [bad, what] of [[{ perFileMB: -1 }, 'negative'], [{ totalMB: 0 }, 'zero'], [{ perFileMB: '4' }, 'a string'],
+                             [{ sizeMB: 4 }, 'an unknown key'], [[4, 16], 'an array'], [null, 'null']]) {
+    const r = runJob(job('b-bad', { ...inv, assets: { 'Art/potion.png': one }, assetBudget: bad }));
+    expect(r.code === 2 && /assetBudget/.test(r.out), `a budget that is ${what} → 2, refused by name (got ${r.code})`);
+  }
+
+  // Mutations. Each rewrites the source for one run and puts it back; the
+  // replaced text must be present, or the mutation tested nothing.
+  const mutate = (file, from, to, fn) => {
+    const path = ROOT + file, orig = readFileSync(path, 'utf8');
+    if (!orig.includes(from)) { expect(false, `mutation target is present in ${file}: ${from}`); return; }
+    try { writeFileSync(path, orig.replace(from, to)); fn(); } finally { writeFileSync(path, orig); }
+  };
+  mutate('scripts/preview.mjs', 'const over = (why) => overBudget.push(', 'const over = (why) => assetSkipped.push(', () =>
+    expect(runJob(TMP + 'b-over.json').code === 1, 'mutation (over budget counted as a problem) → the 3 case becomes 1'));
+  mutate('src/check.js', 'code: problems.length ? 1 : overBudget.length ? 3 : 0', 'code: overBudget.length ? 3 : problems.length ? 1 : 0', () =>
+    expect(runJob(TMP + 'b-both.json').code === 3, 'mutation (3 outranks 1) → the defect case becomes 3'));
+  mutate('scripts/preview.mjs', '    budget[k] = v;', '', () =>
+    expect(runJob(TMP + 'b-raised.json').code === 3, 'mutation (the job budget is ignored) → the raised case stays 3'));
+  mutate('scripts/preview.mjs', "if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) {", 'if (false) {', () =>
+    expect(runJob(job('b-neg', { ...inv, assets: { 'Art/potion.png': one }, assetBudget: { perFileMB: -1 } })).code !== 2,
+      'mutation (no value check) → a negative budget is run instead of refused'));
+  mutate('scripts/preview.mjs', 'if (assetTotal + buf.length > totalLimit) {', 'if (false) {', () =>
+    expect(runJob(TMP + 'b-total.json').code === 0, 'mutation (no total check) → the total case passes'));
+  mutate('src/page.html', '} else if (verdict.code === 3) {', '} else if (false) {', () => {
+    runJob(TMP + 'b-over.json');
+    expect(/^Pass/.test(pageOf('b-over').verdict), 'mutation (page ignores 3) → the page passes an incomplete preview');
+  });
+  runJob(TMP + 'b-over.json');                       // leave the page as the real code writes it
 }
 
 console.log('\nA — the page the human opens is the code we verified');

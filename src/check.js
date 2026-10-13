@@ -496,8 +496,50 @@
     };
   }
 
+  /**
+   * Purpose: the verdict, in one place. The gate turns `code` into its exit
+   *          code and the page turns it into its verdict line, so the two
+   *          cannot reach different conclusions from the same run.
+   * Requires: `meta` carries what only the host could see — sheets and
+   *           templates it could not read, assets it could not find, and
+   *           assets it would not embed because of the budget.
+   * Ensures: code 1 when `problems` is non-empty — a defect in the document
+   *          or in what was given to judge it; otherwise 3 when the budget
+   *          kept an image out, which makes the preview incomplete but says
+   *          nothing about the document; otherwise 0. A defect outranks an
+   *          incomplete preview. Code 2 is never produced here: whoever calls
+   *          this already ran the check.
+   */
+  function judge(res, meta) {
+    meta = meta || {};
+    var problems = [];
+    var push = function (t) { problems.push(t); };
+    if (res.painted.childCount === 0) push('nothing was painted');
+    if (res.painted.elementCount !== res.painted.boxCount) {
+      push((res.painted.boxCount - res.painted.elementCount) + ' laid-out node(s) were never painted');
+    }
+    if (res.unindexed.length) {
+      push(res.unindexed.length + ' laid-out node(s) are absent from the indexed tree — the checks below skipped them, so this report is incomplete in a way it cannot describe');
+    }
+    res.ambiguousDeps.forEach(function (a) {
+      push('"' + a.url + '" names two different documents (' + a.was + ' and ' + a.now + '); one of them was not loaded');
+    });
+    if (res.cascadeMismatch.length) {
+      push(res.cascadeMismatch.length + ' element(s) were painted with a different display than the style judgement saw — the hidden list describes a screen nobody drew');
+    }
+    var templateMisses = meta.templateMisses || [], sheetMisses = meta.sheetMisses || [];
+    if (templateMisses.length) push(templateMisses.length + ' template document(s) could not be read — the instances they fill are missing from the screen entirely, not merely unstyled');
+    if (sheetMisses.length) push(sheetMisses.length + ' stylesheet(s) could not be read — the coordinates below are wrong, not merely incomplete');
+    res.collapsed.forEach(function (c) { push('<' + c.type + '> #' + c.name + ' has no size and is invisible'); });
+    res.overflow.forEach(function (c) { push('<' + c.type + '> #' + c.name + ' runs outside the panel'); });
+    res.other.forEach(function (x) { push(x.kind + ': ' + x.message); });
+    (meta.assetSkipped || []).forEach(function (a) { push('asset not embedded — ' + a.path + ': ' + a.why); });
+    var overBudget = meta.overBudget || [];
+    return { problems: problems, overBudget: overBudget, code: problems.length ? 1 : overBudget.length ? 3 : 0 };
+  }
+
   globalThis.UxmlCheck = {
-    run: run, resolveSheetUrl: resolveSheetUrl,
+    run: run, judge: judge, resolveSheetUrl: resolveSheetUrl,
     checkStates: checkStates, describeStates: describeStates, UNITY_STATES: UNITY_STATES,
   };
 })();

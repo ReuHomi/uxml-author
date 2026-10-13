@@ -13,7 +13,7 @@ way proves nothing.
 | Suite | Guards |
 | --- | --- |
 | `conditions` | painting, the collapse channel and what it must not swallow (hidden, emptied), injected images, multi-sheet resolution |
-| `exitcodes` | 0 / 1 / 2 stay distinguishable, including a simulated missing `happy-dom`; assembled screens, a mistyped `element-name`, a missing template, a cyclic graph, slots, package paths |
+| `exitcodes` | 0, 1, 2 and 3 stay distinguishable and rank 2 over 1 over 3, including a simulated missing `happy-dom`; assembled screens, a mistyped `element-name`, a missing template, a cyclic graph, slots, package paths |
 | `binding` | determinism, name retirement, renames, the untouched logic file, a repeated name refused before anything is written |
 | `docs` | SKILL.md still describes the code it ships with |
 
@@ -33,6 +33,9 @@ Notable mutations, and what would slip past without them:
   reason.
 - **skip the match check on a states key** — a selector that names no element
   is applied to nothing, and the run looks like a check of the state it named.
+- **count an over-budget image as a problem** — a screen with a large
+  background can never exit 0 however correct it is. And the reverse, **let 3
+  outrank 1** — a real defect hides behind "the preview is incomplete".
 - **exempt `Image` from the collapse check** — a sizeless image, once supplied,
   raises no warning in any channel.
 - **always write the logic half** — hand-written C# disappears while all other
@@ -68,7 +71,7 @@ Notable mutations, and what would slip past without them:
   count instead of destructuring into a crash.
 - **copy a directory with `fs.cpSync`** — on Windows, with a non-ASCII character
   anywhere in either path, the process dies with STATUS_ACCESS_VIOLATION and
-  prints nothing at all. No exit code in the 0/1/2 contract, no stack, no line.
+  prints nothing at all. No exit code from the contract at all, no stack, no line.
   Found by two independent verifications on Node v22.17.0 under a Korean user
   folder; spaces in the path are fine, so the trigger is the character set. The
   harness copies with readdir + copyFile for that reason.

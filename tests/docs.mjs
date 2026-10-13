@@ -94,6 +94,19 @@ section('the exit codes are what the table says');
   expect(/\|\s*0\s*\|.*ran, clean/.test(SKILL), 'the table documents 0');
   expect(/\|\s*1\s*\|.*ran, found something/.test(SKILL), 'the table documents 1');
   expect(/\|\s*2\s*\|.*did not run/i.test(SKILL), 'the table documents 2');
+  expect(/\|\s*3\s*\|.*ran, clean, but the preview is incomplete.*budget/.test(SKILL), 'the table documents 3');
+  expect(/Code 3 is never about the UXML or USS/.test(SKILL), 'and says 3 is the budget to fix, not the document');
+  expect(/0–3/.test(SKILL), 'and gives the range as 0–3');
+
+  // The budget the text promises is the budget the script applies.
+  const pSrc = readFileSync(ROOT + 'scripts/preview.mjs', 'utf8');
+  const def = pSrc.match(/DEFAULT_BUDGET = \{ perFileMB: (\d+), totalMB: (\d+) \}/);
+  expect(!!def && new RegExp(`budget: ${def[1]} MB per file and ${def[2]} MB\\s+in total`).test(SKILL),
+    `the documented default budget is the one in preview.mjs (${def && def[1]} and ${def && def[2]} MB)`);
+  expect(/1 MB is 1024 × 1024 bytes/.test(SKILL) && /const MB = 1024 \* 1024;/.test(pSrc), 'and MB means the same in both');
+  expect(/"assetBudget"/.test(SKILL) && pSrc.includes('job.assetBudget'), 'assetBudget is documented and read');
+  expect(/bind uses only 0, 1\s*(\/\/)?\s*and 2/.test(readFileSync(ROOT + 'scripts/bind-csharp.mjs', 'utf8')),
+    'bind-csharp says it uses only 0, 1 and 2');
 
   const noPanel = T + 'nopanel.json';
   writeFileSync(noPanel, JSON.stringify({ uxml: 'Inventory.uxml', out: 'x.html' }));

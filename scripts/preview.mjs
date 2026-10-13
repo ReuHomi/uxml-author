@@ -7,7 +7,12 @@
 //   0  gate ran, everything passed
 //   1  gate ran, something failed — collapse, overflow, unsupported, bad sheet
 //   2  GATE DID NOT RUN — no judgement was made about this output, or not under
-//      the conditions the job asked for (a state that cannot be applied)
+//      the conditions the job asked for (a state or budget that cannot be applied)
+//   3  gate ran, no defect, but the preview is incomplete: an image was over the
+//      embed budget. The budget needs adjusting, not the document.
+//
+// Precedence when more than one holds: 2 over 1 over 3 over 0. A defect and
+// an over-budget image together are 1 — the defect is the news.
 //
 // 1 and 2 must never be merged. "checked and found a problem" and "never
 // checked" look identical to a caller that only tests for zero, and the second
@@ -20,8 +25,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // which fs cannot open. Unity development is largely a Windows activity, so
 // this is not an edge case here.
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const PER_ASSET_LIMIT = 512 * 1024;   // bytes on disk, before base64
-const TOTAL_ASSET_LIMIT = 2 * 1024 * 1024;
+// Bytes on disk, before base64. 1 MB here is 1024 × 1024 bytes.
+const MB = 1024 * 1024;
+const DEFAULT_BUDGET = { perFileMB: 4, totalMB: 16 };
+const mb = (bytes) => (bytes / MB).toFixed(2) + ' MB';
 
 function cannotRun(msg, hint) {
   console.error('CANNOT VERIFY — ' + msg);
@@ -44,6 +51,23 @@ if (!job.panel || !job.panel.width || !job.panel.height) {
   cannotRun('no panel size', 'Every % and stretch in the USS is measured against it; there is no safe default.');
 }
 if (!job.uxml || !existsSync(at(job.uxml))) cannotRun('no UXML at ' + job.uxml);
+
+// A budget the job got wrong is a job that cannot be run as written. Falling
+// back to the default would check a different preview from the one asked for.
+const budget = { ...DEFAULT_BUDGET };
+if (job.assetBudget !== undefined) {
+  const b = job.assetBudget;
+  if (b === null || typeof b !== 'object' || Array.isArray(b)) {
+    cannotRun('assetBudget must be an object like { "perFileMB": 8, "totalMB": 32 }, got ' + JSON.stringify(b));
+  }
+  for (const [k, v] of Object.entries(b)) {
+    if (!(k in DEFAULT_BUDGET)) cannotRun(`assetBudget.${k} is not a budget; use perFileMB and/or totalMB`);
+    if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) {
+      cannotRun(`assetBudget.${k} must be a positive number of MB, got ${JSON.stringify(v)}`);
+    }
+    budget[k] = v;
+  }
+}
 const uxml = readFileSync(at(job.uxml), 'utf8');
 
 // ── environment ─────────────────────────────────────────────────────────────
@@ -146,21 +170,30 @@ for (const [key, text] of Object.entries(templates)) {
   });
 }
 
-// ── encode assets, with a cap that is never silent ──────────────────────────
+// ── encode assets, within a budget that is never silent ─────────────────────
+// Two outcomes, kept apart. A file that is not there is a broken job and stays
+// a problem. A file over the budget is fine — the preview is just short of it —
+// so it goes to its own list, which on its own makes the exit code 3, not 1.
+// Files are read, never written: nothing here converts or replaces a source.
 const MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp' };
 const assets = {};
 const assetSkipped = [];
+const overBudget = [];
+const perFileLimit = budget.perFileMB * MB, totalLimit = budget.totalMB * MB;
 let assetTotal = 0;
 for (const [uxmlPath, file] of Object.entries(job.assets || {})) {
   const abs = at(file);
   if (!existsSync(abs)) { assetSkipped.push({ path: uxmlPath, why: 'file not found: ' + file }); continue; }
   const buf = readFileSync(abs);
-  if (buf.length > PER_ASSET_LIMIT) {
-    assetSkipped.push({ path: uxmlPath, why: `${(buf.length / 1024).toFixed(0)} KB exceeds the ${PER_ASSET_LIMIT / 1024} KB per-file cap` });
+  const over = (why) => overBudget.push({ path: uxmlPath, file, bytes: buf.length, why, budget: { ...budget } });
+  if (buf.length > perFileLimit) {
+    over(`${mb(buf.length)} is over the ${budget.perFileMB} MB per-file budget`);
     continue;
   }
-  if (assetTotal + buf.length > TOTAL_ASSET_LIMIT) {
-    assetSkipped.push({ path: uxmlPath, why: 'the total embedded-asset cap was already reached' });
+  // Files are taken in job order, and one that does not fit does not stop the
+  // ones after it: a smaller file later in the list can still be embedded.
+  if (assetTotal + buf.length > totalLimit) {
+    over(`would bring the embedded total to ${mb(assetTotal + buf.length)}, over the ${budget.totalMB} MB total budget (${mb(assetTotal)} already embedded)`);
     continue;
   }
   assetTotal += buf.length;
@@ -192,28 +225,10 @@ let res;
 try { res = check.run(core, w.document.createElement('div'), input); }
 catch (e) { cannotRun('the render threw: ' + e.message); }
 
-const problems = [];
-const push = (t) => problems.push(t);
-
-if (res.painted.childCount === 0) push('nothing was painted');
-if (res.painted.elementCount !== res.painted.boxCount) {
-  push(`${res.painted.boxCount - res.painted.elementCount} laid-out node(s) were never painted`);
-}
-if (res.unindexed.length) {
-  push(`${res.unindexed.length} laid-out node(s) are absent from the indexed tree — the checks below skipped them, so this report is incomplete in a way it cannot describe`);
-}
-if (res.ambiguousDeps.length) {
-  res.ambiguousDeps.forEach((a) => push(`"${a.url}" names two different documents (${a.was} and ${a.now}); one of them was not loaded`));
-}
-if (res.cascadeMismatch.length) {
-  push(`${res.cascadeMismatch.length} element(s) were painted with a different display than the style judgement saw — the hidden list below describes a screen nobody drew`);
-}
-if (templateMisses.length) push(`${templateMisses.length} template document(s) could not be read — the instances they fill are missing from the screen entirely, not merely unstyled`);
-if (sheetMisses.length) push(`${sheetMisses.length} stylesheet(s) could not be read — the coordinates below are wrong, not merely incomplete`);
-res.collapsed.forEach((c) => push(`<${c.type}> #${c.name} has no size and is invisible`));
-res.overflow.forEach((c) => push(`<${c.type}> #${c.name} runs outside the panel`));
-res.other.forEach((x) => push(`${x.kind}: ${x.message}`));
-assetSkipped.forEach((a) => push(`asset not embedded — ${a.path}: ${a.why}`));
+// The verdict is check.js's, so the page reaches the same one.
+const meta = { sheetMisses, templateMisses, assetSkipped, overBudget, injectedNote: res.injected };
+const verdict = check.judge(res, meta);
+const problems = verdict.problems;
 
 res.dispose();
 
@@ -274,6 +289,15 @@ if (res.injected.length) {
 L(`\nproblems (${problems.length})`);
 problems.forEach((p) => L('  - ' + p));
 
+// Listed apart from problems on purpose: the document is not at fault, the
+// preview is short of an image. The fix is a bigger budget or a smaller file,
+// never an edit to the UXML or USS.
+if (overBudget.length) {
+  L(`\nover the embed budget (${overBudget.length}) — the preview is incomplete, not the document; these are drawn as not yet present`);
+  overBudget.forEach((a) => L(`  - ${a.path} (${a.file}, ${mb(a.bytes)}): ${a.why}   [budget ${a.budget.perFileMB} MB per file, ${a.budget.totalMB} MB total]`));
+  L('  Raise assetBudget in the job to include them; the source files are never changed.');
+}
+
 // ── the human's copy ────────────────────────────────────────────────────────
 const outPath = at(job.out || 'preview.html');
 mkdirSync(dirname(outPath), { recursive: true });
@@ -288,7 +312,7 @@ const page = readFileSync(ROOT + 'src/page.html', 'utf8')
   .replace('"__INPUT__"', () => JSON.stringify({
     ...input,
     title: job.title || job.uxml,
-    meta: { sheetMisses, templateMisses, assetSkipped, injectedNote: res.injected },
+    meta,
   }));
 // The inlined copies must be byte-identical to their sources, and every block
 // must actually parse. A page that silently fails to run is worse than no page:
@@ -309,4 +333,4 @@ L(`\npreview → ${outPath}  (${(page.length / 1024).toFixed(0)} KB)`);
 // with whatever the OS reports.
 await w.happyDOM.close();
 
-process.exit(problems.length ? 1 : 0);
+process.exit(verdict.code);
