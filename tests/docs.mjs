@@ -94,9 +94,18 @@ section('the exit codes are what the table says');
   expect(/\|\s*0\s*\|.*ran, clean/.test(SKILL), 'the table documents 0');
   expect(/\|\s*1\s*\|.*ran, found something/.test(SKILL), 'the table documents 1');
   expect(/\|\s*2\s*\|.*did not run/i.test(SKILL), 'the table documents 2');
-  expect(/\|\s*3\s*\|.*ran, clean, but the preview is incomplete.*budget/.test(SKILL), 'the table documents 3');
+  expect(/\|\s*3\s*\|.*ran, clean, but the preview may differ from Unity.*budget.*not laid out/.test(SKILL), 'the table documents 3, with both causes');
   expect(/Code 3 is never about the UXML or USS/.test(SKILL), 'and says 3 is the budget to fix, not the document');
   expect(/0–3/.test(SKILL), 'and gives the range as 0–3');
+
+  // The rules an agent follows on a warning. Each is a sentence the model acts
+  // on, so each is checked for by what it tells the model to do.
+  const rules = SKILL.slice(SKILL.indexOf('### What to do with a warning'));
+  expect(rules.length > 0 && /\*\*Not USS\*\*[\s\S]*fix it[\s\S]*what to write instead, use that/.test(rules), 'rule: not-uss is fixed, with the replacement when given');
+  expect(/Never remove or change\s+correct USS to make a warning go away/.test(rules), 'rule: correct USS the preview does not draw is kept');
+  expect(/\*\*Ignored here and in Unity\*\*: do nothing/.test(rules), 'rule: matches-unity needs nothing');
+  expect(/\*\*Code 3\*\*: do not say the result matches Unity/.test(rules), 'rule: code 3 is never described as matching Unity');
+  expect(/not for a report with no warnings/.test(rules), 'rule: zero warnings is not the goal');
 
   // The budget the text promises is the budget the script applies.
   const pSrc = readFileSync(ROOT + 'scripts/preview.mjs', 'utf8');
@@ -134,7 +143,7 @@ section('the controls called unsupported are unsupported');
   // kept here. A hardcoded array cannot notice the document naming a control
   // it never heard of — which is exactly how a supported control could be
   // described as unsupported and pass.
-  const para = SKILL.slice(SKILL.indexOf('**Not drawn by this version.**'));
+  const para = SKILL.slice(SKILL.indexOf('**Not drawn by this preview.**'));
   const sentence = para.slice(0, para.indexOf('\n\n'));
   const named = [...sentence.matchAll(/`([A-Z]\w+)`/g)].map((m) => m[1]);
   expect(named.length >= 2, 'the paragraph names some controls: ' + named.join(', '));

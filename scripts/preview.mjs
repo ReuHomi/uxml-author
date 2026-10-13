@@ -9,8 +9,9 @@
 //   2  GATE DID NOT RUN — no judgement was made about this output, or not under
 //      the conditions the job asked for (a state or budget that cannot be applied),
 //      or the run broke on an unexpected error before deciding anything
-//   3  gate ran, no defect, but the preview is incomplete: an image was over the
-//      embed budget. The budget needs adjusting, not the document.
+//   3  gate ran, no defect, but the preview may differ from Unity: an image was
+//      over the embed budget, or a property that moves boxes in Unity was not
+//      laid out here. Check those parts in Unity; the document needs no edit.
 //
 // Precedence when more than one holds: 2 over 1 over 3 over 0. A defect and
 // an over-budget image together are 1 — the defect is the news.
@@ -315,8 +316,16 @@ const L = (s) => console.log(s);
 L(`panel ${job.panel.width}x${job.panel.height}   sheets ${Object.keys(sheets).length}   templates ${Object.keys(templates).length}   assets embedded ${Object.keys(assets).length}`);
 L(check.describeStates(res.applied));
 
-L(`\nnot drawn by this version (${res.unsupported.length}) — invisible here, visible in Unity; this list is the only trace`);
+L(`\nnot drawn by this preview (${res.unsupported.length}) — valid USS/UXML that Unity applies; not a fault, keep it; this list is the only trace`);
 res.unsupported.forEach((x) => L('  - ' + x.message));
+
+// Not drawn, and Unity would have moved boxes for it. The run cannot vouch
+// that sizes and positions here are Unity's, which is what code 3 says.
+if (res.layoutGaps.length) {
+  L(`\nnot laid out by this preview (${res.layoutGaps.length}) — valid USS that changes size or position in Unity; check this part in Unity`);
+  res.layoutGaps.forEach((x) => L('  - ' + check.describeGap(x)));
+  L('  Zero-size and overflow findings below come from this preview\'s layout, not Unity\'s.');
+}
 
 // Two sources, and neither alone is enough: the core reports a repeated name
 // only once expansion produced it, so a hand-written document that repeats one
@@ -351,6 +360,11 @@ if (res.emptied.length) {
   L('  If that is not the state you meant, check the rules that hide its children.');
 }
 
+if (res.matchesUnity.length) {
+  L(`\nignored here and in Unity (${res.matchesUnity.length}) — not a defect; nothing to do`);
+  res.matchesUnity.forEach((x) => L('  - ' + x.message));
+}
+
 if (res.versionDependent.length) {
   L(`\nmeasured on Unity 6000.0.40f1 (${res.versionDependent.length}) — a standing condition, not a problem`);
   res.versionDependent.forEach((x) => L('  - ' + x.message));
@@ -371,7 +385,7 @@ problems.forEach((p) => L('  - ' + p));
 // preview is short of an image. The fix is a bigger budget or a smaller file,
 // never an edit to the UXML or USS.
 if (overBudget.length) {
-  L(`\nover the embed budget (${overBudget.length}) — the preview is incomplete, not the document; these are drawn as not yet present`);
+  L(`\nover the embed budget (${overBudget.length}) — the preview may differ from Unity, not the document; these are drawn as not yet present`);
   overBudget.forEach((a) => L(`  - ${a.path} (${a.file}, ${mb(a.bytes)}): ${a.why}   [budget ${a.budget.perFileMB} MB per file, ${a.budget.totalMB} MB total]`));
   L('  Raise assetBudget in the job to include them; the source files are never changed.');
 }

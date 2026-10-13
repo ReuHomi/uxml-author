@@ -148,16 +148,19 @@ reading it will cost you the conversation for nothing.
 | 0 | ran, clean | carry on |
 | 1 | ran, found something | fix it, or tell the person plainly if you cannot |
 | 2 | **did not run** | nothing checked this output; say so before showing anything |
-| 3 | ran, clean, but the preview is incomplete | an image was over the embed budget; adjust `assetBudget`, not the document |
+| 3 | ran, clean, but the preview may differ from Unity | an image was over the embed budget, or a property that moves boxes in Unity was not laid out; say which parts to check in Unity, and do not edit the document for it |
 
 The codes run 0–3. When several apply, 2 wins over 1, 1 over 3, and 3 over 0:
 a defect alongside an over-budget image is a 1, because the defect is what
 needs a fix.
 
-Code 3 is never about the UXML or USS. Do not edit the screen to make it go
-away — raise the budget, or tell the person the preview draws those images as
-not yet present. The report lists each one with its size and the budget it
-was measured against.
+Code 3 is never about the UXML or USS. It has two causes, and the report names
+each one: an image over the embed budget (raise `assetBudget`, or tell the
+person it is drawn as not yet present), and a valid property that changes size
+or position in Unity but that this preview does not lay out, such as
+`aspect-ratio` (the coordinates around it are this preview's, not Unity's). Do
+not edit the screen to make code 3 go away. Never describe a code-3 result as
+matching Unity; tell the person which parts to check in Unity.
 
 Code 2 usually means `happy-dom` is missing (`npm install happy-dom`) or the
 panel size is absent. It also means the job asked for something that cannot be
@@ -174,11 +177,35 @@ failure this whole tool exists to prevent.
 
 The channels mean different things and must not be flattened together.
 
-**Not drawn by this version.** `Toggle`, `Slider`, `TextField` and other
+**Not drawn by this preview.** `Toggle`, `Slider`, `TextField` and other
 controls the renderer has no drawing for fall back to a plain element, which
 means height 0 — they vanish from the preview, and everything below them slides
-up. Unity draws them normally. Nothing on the screen marks their absence, so
-this list is the only trace. Always pass it on.
+up. Unity draws them normally. Valid properties the preview does not paint,
+such as `text-shadow` or `transition`, are listed here too. Nothing on the
+screen marks their absence, so this list is the only trace. Always pass it on.
+
+**Not laid out by this preview.** Valid USS that changes size or position in
+Unity — `aspect-ratio`, or `letter-spacing`, which is drawn but left out of
+text measurement — and that this preview does not lay out. The run exits 3,
+and any zero-size or overflow finding is marked as coming from this preview's
+layout.
+
+**Ignored here and in Unity.** Not a defect; Unity ignores these too.
+
+### What to do with a warning
+
+The report sorts every warning by what it is, and that decides what you do.
+Aim for a screen that is right in Unity, not for a report with no warnings —
+on this version a correct screen often has some.
+
+- **Not USS** (a property or value USS does not have, such as `colour` or
+  `font-family`): fix it. When the report says what to write instead, use that.
+- **Not drawn, or not laid out, by this preview**, for valid USS: leave it in.
+  It is the preview's limit, not the document's. Never remove or change
+  correct USS to make a warning go away.
+- **Ignored here and in Unity**: do nothing.
+- **Code 3**: do not say the result matches Unity. Name the parts the person
+  should check in Unity.
 
 **Assets not yet present.** Normal while a UI is new. Drawn as a magenta hatch,
 so the person can already see it. Do not present these as problems; burying a
