@@ -80,7 +80,17 @@ node scripts/preview.mjs job.json
 }
 ```
 Stylesheets are found relative to the UXML and read automatically; `assets` is
-optional and only for images the person supplied.
+optional and only for images the person supplied. A file named in `assets` that
+does not exist stops the run with code 2, listing every such file; leave out
+an image you do not have instead, and it is drawn as not yet present.
+
+Images are embedded into the preview within a budget: 4 MB per file and 16 MB
+in total by default, where 1 MB is 1024 × 1024 bytes on disk. A file over it is
+left out of the preview, listed as over budget, and drawn as not yet present;
+the source file is never converted or changed. To include a large background,
+set `"assetBudget": { "perFileMB": 8, "totalMB": 32 }` in the job — either key
+on its own is fine. A value that is not a positive number stops the run with
+code 2.
 
 ```
 node scripts/bind-csharp.mjs bind.json
@@ -96,7 +106,39 @@ node scripts/bind-csharp.mjs bind.json
 ```
 `renames` is only for a rename the person actually asked for.
 
-Never open `src/core.bundle.js`. It is a 166 KB minified build artifact and
+**Checking a screen in a particular state.** Rules under `:hover`, `:active`,
+`:focus`, `:checked`, `:disabled` and the like never apply in a plain run. To
+judge the screen as it looks in one of those states, name it in the job:
+
+```json
+{
+  "uxml": "Inventory.uxml",
+  "panel": { "width": 1920, "height": 1080 },
+  "states": { "#UseButton": ["hover", "active"] },
+  "out": "preview-pressed.html"
+}
+```
+
+`states` maps a USS selector to the states the elements it matches are in.
+The selector picks elements as they are before any state is applied, so it
+must not itself contain a state: `"#UseButton"`, not `"#UseButton:disabled"` —
+the second matches nothing, even on a button with `enabled="false"`, and is
+refused.
+`activeStates` is a plain list of states every element is in at once, such as
+`["disabled"]`. Both are optional; leave them out and nothing changes. The
+names are Unity's own pseudo-classes — `hover`, `active`, `inactive`, `focus`,
+`disabled`, `enabled`, `checked` — and the list is always an array, even for
+one state. The report's second line and the top of the preview name the
+combination that was applied, so say it when you show the result.
+
+The run refuses (code 2) rather than guess when the request cannot be honoured:
+a value that is not an array, a name that is not a Unity state, a selector the
+renderer cannot use, or a selector that matches no element. Each of those would
+otherwise produce a screen that looks checked and is not the one asked about.
+Fix the job and run again.
+
+Never open `src/core.bundle.js`. It is a generated build artifact of about
+223 KB (3,703 lines) — not minified, but every identifier is mangled — and
 reading it will cost you the conversation for nothing.
 
 ## Exit codes
@@ -106,16 +148,31 @@ reading it will cost you the conversation for nothing.
 | 0 | ran, clean | carry on |
 | 1 | ran, found something | fix it, or tell the person plainly if you cannot |
 | 2 | **did not run** | nothing checked this output; say so before showing anything |
+| 3 | ran, clean, but the preview is incomplete | an image was over the embed budget; adjust `assetBudget`, not the document |
+
+The codes run 0–3. When several apply, 2 wins over 1, 1 over 3, and 3 over 0:
+a defect alongside an over-budget image is a 1, because the defect is what
+needs a fix.
+
+Code 3 is never about the UXML or USS. Do not edit the screen to make it go
+away — raise the budget, or tell the person the preview draws those images as
+not yet present. The report lists each one with its size and the budget it
+was measured against.
 
 Code 2 usually means `happy-dom` is missing (`npm install happy-dom`) or the
-panel size is absent. The preview HTML still renders in a browser — it needs no
-Node — but no machine has looked at it. Say that out loud. A file presented as
-if it were checked, when it was not, is the failure this whole tool exists to
-prevent.
+panel size is absent. It also means the job asked for something that cannot be
+applied — a state or a budget it got wrong — and the message names which. And
+it is what a crash looks like: an unexpected error is reported as code 2 with
+the error itself, never as 1, because the run decided nothing. No
+preview is written on code 2. If a `preview.html` is already at the output path,
+it is from an earlier run and nothing checked it against the current files; the
+message says so. Say that out loud, and do not show the old file as if it were
+this run's. A file presented as if it were checked, when it was not, is the
+failure this whole tool exists to prevent.
 
 ## Reading the report
 
-Four of the channels mean different things and must not be flattened together.
+The channels mean different things and must not be flattened together.
 
 **Not drawn by this version.** `Toggle`, `Slider`, `TextField` and other
 controls the renderer has no drawing for fall back to a plain element, which
@@ -149,7 +206,25 @@ constraint on the code, never as a broken screen.
 
 **Collapsed to zero size.** A failure that raises no warning at all. Usually a
 `<ui:Image>` with no size in the USS, or a container whose children could not
-give it a height. Always fix these.
+give it a height. Fix these — but only these. Zero size has two other causes
+that are not defects, and they are reported apart so they are never "fixed"
+by accident:
+
+**Hidden by `display: none`.** The element, or one of its ancestors, is
+`display: none` in the final applied style — a USS class, a pseudo-state such
+as `:hover`, or an inline `style` all count. A deliberate state, so it never
+changes the exit code. It is still always listed, with the rule that did it,
+because a mistyped class hides an element just as well as an intended one. Read
+the list and confirm each entry is meant; pass on any you cannot vouch for.
+`opacity: 0` and `visibility: hidden` are not part of this: such an element
+keeps its size and is judged like any other.
+
+**Emptied by hidden children.** An element that is shown, has no size of its
+own, and whose children are all hidden (or emptied in turn) — a tab container
+with every page switched off, say. Not a defect and not in the exit code. If it
+is not the state the person meant, the rules hiding its children are where to
+look. An element with an explicit `width: 0` or `height: 0`, or with even one
+visible child, stays in *Collapsed*.
 
 `Measured on Unity 6000.0.40f1` is a standing condition, not an event. It fires
 whenever a control uses theme defaults. Do not treat it as a problem and do not

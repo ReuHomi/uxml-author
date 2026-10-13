@@ -12,8 +12,8 @@ way proves nothing.
 
 | Suite | Guards |
 | --- | --- |
-| `conditions` | painting, the collapse channel, injected images, multi-sheet resolution |
-| `exitcodes` | 0 / 1 / 2 stay distinguishable, including a simulated missing `happy-dom`; assembled screens, a mistyped `element-name`, a missing template, a cyclic graph, slots, package paths |
+| `conditions` | painting, the collapse channel and what it must not swallow (hidden, emptied), injected images, multi-sheet resolution |
+| `exitcodes` | 0, 1, 2 and 3 stay distinguishable and rank 2 over 1 over 3, including a simulated missing `happy-dom`; assembled screens, a mistyped `element-name`, a missing template, a cyclic graph, slots, package paths |
 | `binding` | determinism, name retirement, renames, the untouched logic file, a repeated name refused before anything is written |
 | `docs` | SKILL.md still describes the code it ships with |
 
@@ -23,6 +23,19 @@ Notable mutations, and what would slip past without them:
   screen is blank. Found in the browser first, then given a test.
 - **read painting from a snapshot** — the assertion is worded correctly and
   passes over a torn-down container. Only a mutation exposed it.
+- **judge `display: none` from the inline style only** — a USS class or a
+  pseudo-state hides the element on screen while the report calls it collapsed.
+  The class case fails; so does handing the style judgement different states
+  from the render, which the cascade-agreement check catches.
+- **let a states value be a string** — the core iterates it letter by letter and
+  applies nothing, so a job asking for `"hover"` checks the plain screen and
+  says it passed. Refused by name; the mutation shows the refusal losing its
+  reason.
+- **skip the match check on a states key** — a selector that names no element
+  is applied to nothing, and the run looks like a check of the state it named.
+- **count an over-budget image as a problem** — a screen with a large
+  background can never exit 0 however correct it is. And the reverse, **let 3
+  outrank 1** — a real defect hides behind "the preview is incomplete".
 - **exempt `Image` from the collapse check** — a sizeless image, once supplied,
   raises no warning in any channel.
 - **always write the logic half** — hand-written C# disappears while all other
@@ -58,7 +71,7 @@ Notable mutations, and what would slip past without them:
   count instead of destructuring into a crash.
 - **copy a directory with `fs.cpSync`** — on Windows, with a non-ASCII character
   anywhere in either path, the process dies with STATUS_ACCESS_VIOLATION and
-  prints nothing at all. No exit code in the 0/1/2 contract, no stack, no line.
+  prints nothing at all. No exit code from the contract at all, no stack, no line.
   Found by two independent verifications on Node v22.17.0 under a Korean user
   folder; spaces in the path are fine, so the trigger is the character set. The
   harness copies with readdir + copyFile for that reason.

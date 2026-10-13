@@ -18,6 +18,7 @@
     --red:    #C4342B;
     --green:  #1F7A45;
     --amber:  #A2740C;
+    --blue:   #2F5FA8;
     --check:  #F2F2F0;
     --check2: #FFFFFF;
   }
@@ -32,6 +33,7 @@
     --red:    #E2695C;
     --green:  #4FAE7C;
     --amber:  #D3A431;
+    --blue:   #7BA4E0;
     --check:  #1B1D20;
     --check2: #17181B;
   }
@@ -40,7 +42,7 @@
       color-scheme: dark;
       --paper:  #0F1012; --card:   #17181B; --rule:   #2C2F34;
       --mute:   #7C8189; --slate:  #C3C7CD; --ink:    #FAFAF8;
-      --red:    #E2695C; --green:  #4FAE7C; --amber:  #D3A431;
+      --red:    #E2695C; --green:  #4FAE7C; --amber:  #D3A431; --blue: #7BA4E0;
       --check:  #1B1D20; --check2: #17181B;
     }
   }
@@ -53,6 +55,7 @@
   header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
   h1 { font-size: 17px; margin: 0 0 3px; font-weight: 600; letter-spacing: -.015em; }
   .sub { color: var(--mute); margin: 0 0 24px; font-size: 12.5px; }
+  #applied { margin-top: -18px; color: var(--slate); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
   .label {
     font-size: 10.5px; font-weight: 600; letter-spacing: .08em;
     text-transform: uppercase; color: var(--mute); margin: 0 0 12px;
@@ -100,6 +103,7 @@
   }
   .has.sev-read    .n { color: var(--card); background: var(--amber); border-color: var(--amber); }
   .has.sev-problem .n { color: var(--card); background: var(--red);   border-color: var(--red); }
+  .has.sev-budget  .n { color: var(--card); background: var(--blue);  border-color: var(--blue); }
   .has.sev-flat    .n { color: var(--slate); background: var(--paper); border-color: var(--mute); }
   .chan p { margin: 0 0 9px; font-size: 12px; color: var(--mute); max-width: 82ch; }
   ul { margin: 0; padding-left: 17px; }
@@ -120,6 +124,7 @@
   <div>
     <h1 id="h1">UXML preview</h1>
     <p class="sub">Everything needed to judge this is in this one file. It loads nothing from anywhere.</p>
+    <p class="sub" id="applied"></p>
   </div>
   <button id="theme" type="button" aria-pressed="false">Dark</button>
 </header>
@@ -204,6 +209,7 @@
     var res = globalThis.UxmlCheck.run(core, stage, UXML_INPUT);
 
     if (UXML_INPUT.title) document.getElementById('h1').textContent = UXML_INPUT.title;
+    document.getElementById('applied').textContent = globalThis.UxmlCheck.describeStates(res.applied);
     document.getElementById('src-uxml').textContent = UXML_INPUT.uxml;
     document.getElementById('src-uss').textContent = Object.keys(UXML_INPUT.sheets)
       .map(function (k) { return '/* ' + k + ' */\n' + UXML_INPUT.sheets[k]; }).join('\n\n');
@@ -296,8 +302,24 @@
 
     channel('problem', 'Collapsed to zero size',
       'A failure that raises no warning. Nodes already listed above are left out \u2014 the same ' +
-      'fact counted twice is still one fact.',
+      'fact counted twice is still one fact \u2014 and so is anything hidden by ' +
+      '<code>display: none</code>, which has its own list below.',
       res.collapsed, function (c) { return '<code>&lt;' + esc(c.type) + '&gt; #' + esc(c.name) + '</code>'; });
+
+    channel('read', 'Hidden by display: none',
+      'Not a problem and not counted in the verdict. The element, or an ancestor, is ' +
+      '<code>display: none</code> in the final applied style. Listed anyway: a mistyped class ' +
+      'hides things exactly as well as an intended state, and only you can tell which.',
+      res.hidden, function (h) {
+        return '<code>&lt;' + esc(h.type) + '&gt; #' + esc(h.name) + '</code> \u2014 ' +
+          (h.by.self ? 'itself' : 'inside <code>#' + esc(h.by.name || '(unnamed ' + h.by.type + ')') + '</code>') +
+          ', by ' + esc(h.origin);
+      });
+
+    channel('read', 'Emptied by hidden children',
+      'Zero size only because every child it has is hidden. Not counted in the verdict. If this ' +
+      'is not the state you meant, check the rules that hide its children.',
+      res.emptied, function (c) { return '<code>&lt;' + esc(c.type) + '&gt; #' + esc(c.name) + '</code>'; });
 
     channel('problem', 'Outside the panel',
       'Measured against ' + panel.width + ' \u00d7 ' + panel.height + '.',
@@ -309,10 +331,16 @@
       'incomplete.',
       misses, function (m) { return '<code>' + esc(m.key) + '</code>'; });
 
-    var skipped = (UXML_INPUT.meta && UXML_INPUT.meta.assetSkipped) || [];
-    channel('problem', 'Images left out of the embed',
-      'Dropping one quietly would read as a broken path.',
-      skipped, function (a) { return '<code>' + esc(a.path) + '</code> \u2014 ' + esc(a.why); });
+    var overBudget = (UXML_INPUT.meta && UXML_INPUT.meta.overBudget) || [];
+    channel('budget', 'Over the embed budget',
+      'Not a problem with the screen: these images were too large to embed, so this preview ' +
+      'draws them as not yet present. Raise <code>assetBudget</code> in the job to include them; ' +
+      'the source files are never changed.',
+      overBudget, function (a) {
+        return '<code>' + esc(a.path) + '</code> (' + esc(a.file) + ', ' + (a.bytes / 1048576).toFixed(2) +
+          ' MB) \u2014 ' + esc(a.why) + ' \u2014 budget ' + a.budget.perFileMB + ' MB per file, ' +
+          a.budget.totalMB + ' MB total';
+      });
 
     channel('flat', 'Measured on Unity 6000.0.40f1',
       'Raised whenever a control relies on theme defaults, so it is a standing condition rather ' +
@@ -333,15 +361,19 @@
     var painted = stage.childNodes.length > 0 &&
                   res.painted.elementCount === res.painted.boxCount &&
                   res.painted.childCount > 0;
-    var clean = res.collapsed.length === 0 && res.overflow.length === 0 &&
-                res.other.length === 0 && misses.length === 0 && skipped.length === 0;
+    // The verdict is check.js's, the same function the headless gate exits by.
+    var verdict = globalThis.UxmlCheck.judge(res, UXML_INPUT.meta);
 
     if (!painted) {
       say('Fail \u2014 the channels agree but nothing stayed on screen. (children ' +
           stage.childNodes.length + ', painted ' + res.painted.elementCount +
           ' of ' + res.painted.boxCount + ')', 'var(--red)');
-    } else if (!clean) {
+    } else if (verdict.code === 1) {
       say('Attention \u2014 it painted, but the report flags something below.', 'var(--amber)');
+    } else if (verdict.code === 3) {
+      say('Incomplete preview \u2014 no problems found in the screen, but ' + verdict.overBudget.length +
+          ' image(s) were over the embed budget and are not drawn. Adjust the budget, not the document.',
+          'var(--blue)');
     } else {
       say('Pass \u2014 it painted, and the judgement channels are empty.', 'var(--green)');
     }

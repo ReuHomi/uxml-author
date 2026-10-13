@@ -1,8 +1,10 @@
 // The exit code is the contract. 1 and 2 must stay distinguishable:
-// "checked, found a problem" vs "never checked".
+// "checked, found a problem" vs "never checked". 3 is a third thing again:
+// "checked, nothing wrong with the document, but the preview is short of an
+// image the budget kept out" — and it must never hide a 1.
 import { execFileSync, execFileSync as run } from 'node:child_process';
 import { writeFileSync, mkdirSync, renameSync, existsSync, rmSync,
-         readdirSync, copyFileSync } from 'node:fs';
+         readdirSync, copyFileSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 
@@ -44,6 +46,22 @@ function job(name, obj) {
   return p;
 }
 const goodJob = TMP + 'demo/job.json';
+function runJob(jobPath) {
+  try { return { code: 0, out: execFileSync('node', [ROOT + 'scripts/preview.mjs', jobPath], { encoding: 'utf8', stdio: 'pipe' }) }; }
+  catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
+}
+// Mutations rewrite a source file for one run and put it back. The replaced
+// text must be present, or the mutation tested nothing — that is a failure.
+function mutate(file, from, to, fn) {
+  const path = ROOT + file, orig = readFileSync(path, 'utf8');
+  if (!orig.includes(from)) { expect(false, `mutation target is present in ${file}: ${from}`); return; }
+  try { writeFileSync(path, orig.replace(from, to)); fn(); } finally { writeFileSync(path, orig); }
+}
+// What the page a person opens decided, read by actually running it.
+function pageOf(name) {
+  return JSON.parse(execFileSync('node', [ROOT + 'tests/page-verdict.mjs', TMP + '../out/' + name + '.html'],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
+}
 
 console.log('\ncode 0 — gate ran, clean');
 expect(exitOf(goodJob) === 0, 'the demo passes');
@@ -60,9 +78,136 @@ expect(exitOf(job('nouxml', { uxml: 'demo/Missing.uxml', panel: { width: 400, he
   let moved = false;
   try {
     if (existsSync(mod)) { renameSync(mod, hidden); moved = true; }
-    expect(exitOf(goodJob) === 2, 'happy-dom missing → 2, not a silent pass');
+    const hd = runJob(goodJob);
+    expect(hd.code === 2, 'happy-dom missing → 2, not a silent pass');
+    expect(!/may still be produced|preview HTML still works/.test(hd.out) && /No preview was written/.test(hd.out),
+      'and it does not claim a preview page exists');
   } finally { if (moved) renameSync(hidden, mod); }
   expect(exitOf(goodJob) === 0, 'and it recovers once happy-dom is back');
+}
+
+console.log('\nevery refusal says what is on disk, and none claims a file it did not write');
+{
+  const { readFileSync, statSync } = await import('node:fs');
+  // Each path that ends in code 2, grouped by where it stops. None of them
+  // writes the page; the message must say so, and must name a stale page left
+  // at the output path by an earlier run instead of letting it pass as new.
+  const OLD = /may still be produced/;
+  const NONE = /No preview was written, and nothing was checked\./;
+  const STALE = /No preview was written by this run\. The file already at .*stale\.html is from an earlier run/;
+  const inv = { uxml: 'demo/Inventory.uxml', panel: { width: 480, height: 320 } };
+  const paths = [
+    ['no job file', () => runJob(TMP + 'nope.json')],
+    ['unparseable job', () => runJob(TMP + 'bad.json')],
+    ['job format: no panel', () => runJob(job('r-nopanel', { uxml: 'demo/Inventory.uxml' }))],
+    ['job format: bad budget', () => runJob(job('r-budget', { ...inv, assetBudget: { perFileMB: 0 } }))],
+    ['states that cannot apply', () => runJob(job('r-states', { ...inv, states: { '#Nope': ['hover'] } }))],
+  ];
+  for (const [what, go] of paths) {
+    const r = go();
+    expect(r.code === 2 && NONE.test(r.out) && !OLD.test(r.out), `${what} → 2, "no preview was written", nothing about files being produced`);
+  }
+  for (const n of ['r-nopanel', 'r-budget', 'r-states']) {
+    expect(!existsSync(TMP + '../out/' + n + '.html'), `and ${n} really left no page behind`);
+  }
+
+  // A page from an earlier run sits at the output path. The refusal names it
+  // as old, and leaves it exactly as it was.
+  mkdirSync(TMP + '../out', { recursive: true });
+  const stalePath = TMP + '../out/stale.html';
+  for (const [what, extra] of [['bad budget', { assetBudget: { totalMB: -1 } }], ['states', { states: { '#Use': 'hover' } }],
+                               ['no panel', { panel: undefined }]]) {
+    writeFileSync(stalePath, '<!-- from an earlier run -->');
+    const before = statSync(stalePath).mtimeMs;
+    const p = TMP + 'stale.json';
+    writeFileSync(p, JSON.stringify({ ...inv, ...extra, out: '../out/stale.html' }));
+    const r = runJob(p);
+    expect(r.code === 2 && STALE.test(r.out) && !NONE.test(r.out),
+      `${what} with an old page at the output path → the message calls it an earlier run's, unchecked`);
+    expect(readFileSync(stalePath, 'utf8') === '<!-- from an earlier run -->' && statSync(stalePath).mtimeMs === before,
+      'and the old page is left untouched');
+  }
+  // mutations
+  mutate('scripts/preview.mjs', "  return '  No preview was written, and nothing was checked.';",
+    "  return '  The files may still be produced, but nothing has checked them.';", () => {
+      const r = runJob(job('r-nopanel', { uxml: 'demo/Inventory.uxml' }));
+      expect(OLD.test(r.out), 'mutation (the old closing line) → the no-panel case sees it and fails');
+    });
+  mutate('scripts/preview.mjs', '  if (outPath && existsSync(outPath)) {', '  if (false) {', () => {
+    writeFileSync(stalePath, '<!-- from an earlier run -->');
+    const r = runJob(TMP + 'stale.json');
+    expect(!STALE.test(r.out), 'mutation (stale page not looked for) → the earlier-run case catches it');
+  });
+  mutate('scripts/preview.mjs', "outPath = at(job.out || 'preview.html');\n", '', () => {
+    writeFileSync(stalePath, '<!-- from an earlier run -->');
+    const r = runJob(TMP + 'stale.json');
+    expect(!STALE.test(r.out), 'mutation (output path known only at the end) → the earlier-run case catches it');
+  });
+  rmSync(stalePath, { force: true });
+}
+
+console.log('\nan unexpected error is code 2, never 1');
+{
+  // Node exits 1 on an unhandled error, and 1 is "checked, found a problem".
+  // Each case here is a run that decided nothing; each must say so with a 2.
+  const NOT_JUDGED = /not a judgement of the UXML or USS/;
+  for (const [text, what, re] of [['null', 'null', /holds null/], ['42', 'a number', /holds a number \(42\)/],
+                                   ['[{"uxml":"x"}]', 'an array', /holds an array/], ['"job.json"', 'a string', /holds a string \("job\.json"\)/]]) {
+    const p = TMP + 'shape.json';
+    writeFileSync(p, text);
+    const r = runJob(p);
+    expect(r.code === 2 && /must hold a JSON object/.test(r.out) && re.test(r.out) && !/TypeError/.test(r.out),
+      `a job that is ${what} → 2, refused by name rather than by a crash (got ${r.code})`);
+  }
+
+  const AFTER_CHECK = "catch (e) { cannotRun('the render threw: ' + e.message); }\n";
+  mutate('scripts/preview.mjs', AFTER_CHECK, AFTER_CHECK + "throw new Error('mutation: thrown after the check');\n", () => {
+    rmSync(TMP + 'out/preview.html', { force: true });
+    const r = runJob(goodJob);
+    expect(r.code === 2, `mutation (throw right after the check) → 2, not 1 (got ${r.code})`);
+    expect(/thrown after the check/.test(r.out) && NOT_JUDGED.test(r.out) && /No preview was written, and nothing was checked/.test(r.out),
+      'and the message carries the error, says it is not a judgement, and says no preview was written');
+    writeFileSync(TMP + 'out/preview.html', '<!-- from an earlier run -->');
+    const s2 = runJob(goodJob);
+    expect(s2.code === 2 && /is from an earlier run/.test(s2.out), 'with an old page at the path, it names that page as an earlier run\'s');
+    rmSync(TMP + 'out/preview.html', { force: true });
+
+    // The net is what makes this a 2. Without it Node's own 1 comes back.
+    mutate('scripts/preview.mjs', "process.on('uncaughtException', unexpected);\n", '', () =>
+      expect(runJob(goodJob).code === 1, 'mutation (no safety net) → the same throw exits 1, so the case above catches it'));
+  });
+  mutate('scripts/preview.mjs', AFTER_CHECK, AFTER_CHECK + "await Promise.reject(new Error('mutation: rejected after the check'));\n", () => {
+    const r = runJob(goodJob);
+    expect(r.code === 2 && /rejected after the check/.test(r.out) && NOT_JUDGED.test(r.out),
+      `mutation (a rejected await after the check) → 2 (got ${r.code})`);
+  });
+  // A rejection nobody awaits. Under Node's default it is rethrown and the
+  // uncaughtException hook would catch it anyway; the rejection hook is what
+  // holds when Node is told only to warn, where without it the run carries on
+  // and can exit 0 on a check that broke halfway.
+  {
+    const warnOnly = (jobPath) => {
+      try { execFileSync('node', ['--unhandled-rejections=warn', ROOT + 'scripts/preview.mjs', jobPath], { stdio: 'pipe' }); return 0; }
+      catch (e) { return e.status; }
+    };
+    mutate('scripts/preview.mjs', AFTER_CHECK, AFTER_CHECK + "Promise.reject(new Error('mutation: a rejection nobody awaits'));\n", () => {
+      expect(warnOnly(goodJob) === 2, 'mutation (a floating rejection, Node set to warn only) → 2');
+      mutate('scripts/preview.mjs', "process.on('unhandledRejection', unexpected);\n", '', () =>
+        expect(warnOnly(goodJob) === 0, 'mutation (no rejection hook) → the broken run exits 0, so the case above catches it'));
+    });
+  }
+  mutate('scripts/preview.mjs', "pageWritten = true;\n", "pageWritten = true;\nthrow new Error('mutation: thrown after the page');\n", () => {
+    const r = runJob(goodJob);
+    expect(r.code === 2 && /A preview was written to .* but the run did not finish; do not present it as checked/.test(r.out),
+      `mutation (throw after the page is written) → 2, and the message says the page exists but is not checked (got ${r.code})`);
+  });
+  mutate('scripts/preview.mjs', "if (job === null || typeof job !== 'object' || Array.isArray(job)) {", 'if (false) {', () => {
+    writeFileSync(TMP + 'shape.json', 'null');
+    const r = runJob(TMP + 'shape.json');
+    expect(r.code === 2 && !/must hold a JSON object/.test(r.out) && NOT_JUDGED.test(r.out),
+      'mutation (no shape check) → the net still gives 2, but the reason is a stack trace, which the shape case catches');
+  });
+  runJob(goodJob);
 }
 
 console.log('\ncode 1 — gate ran, judgement failed');
@@ -79,26 +224,174 @@ writeFileSync(TMP + 'NoSheet.uxml',
 expect(exitOf(job('nosheet', { uxml: 'NoSheet.uxml', panel: { width: 300, height: 200 } })) === 1,
   'an unreadable stylesheet → 1 (wrong coordinates, not merely missing style)');
 
+console.log('\nhidden is reported, never counted');
+{
+  // The external report's fixture, verbatim.
+  writeFileSync(TMP + 'Report.uxml', `<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <ui:VisualElement name="Hidden" style="display:none;width:80px;height:40px">
+        <ui:VisualElement name="Child" style="width:20px;height:10px" />
+    </ui:VisualElement>
+</ui:UXML>`);
+  const r = runJob(job('report', { uxml: 'Report.uxml', panel: { width: 300, height: 200 } }));
+  expect(r.code === 0, `display: none on a parent and its child → 0 (got ${r.code})`);
+  expect(/hidden by display: none \(2\)/.test(r.out) && /#Hidden — itself, by inline style attribute/.test(r.out) &&
+    /#Child — inside #Hidden/.test(r.out), 'and both are listed, with what hid them');
+  const pg = pageOf('report');
+  expect(/^Pass/.test(pg.verdict), 'the page agrees: ' + pg.verdict);
+  expect(pg.channels['Hidden by display: none'].count === 2, 'and lists the same two as hidden');
+  expect(pg.channels['Collapsed to zero size'].count === 0, 'and none as collapsed');
+
+  writeFileSync(TMP + 'Styles/E.uss', '.gone { display: none; } .sized { width: 20px; height: 20px; }');
+  writeFileSync(TMP + 'Emptied.uxml', `<ui:UXML xmlns:ui="UnityEngine.UIElements"><Style src="Styles/E.uss" />
+    <ui:VisualElement name="Tabs"><ui:VisualElement name="Page" class="gone sized" /></ui:VisualElement></ui:UXML>`);
+  const e = runJob(job('emptied', { uxml: 'Emptied.uxml', panel: { width: 300, height: 200 } }));
+  expect(e.code === 0, `a container emptied by hidden children → 0 (got ${e.code})`);
+  expect(/emptied by hidden children \(1\)/.test(e.out) && /#Tabs/.test(e.out) &&
+    /check the rules that hide its children/.test(e.out), 'and it is listed with a prompt to confirm it was meant');
+  const pe = pageOf('emptied');
+  expect(/^Pass/.test(pe.verdict) && pe.channels['Emptied by hidden children'].count === 1, 'the page agrees');
+
+  writeFileSync(TMP + 'Mixed.uxml', `<ui:UXML xmlns:ui="UnityEngine.UIElements"><Style src="Styles/E.uss" />
+    <ui:VisualElement name="Box"><ui:VisualElement name="Page" class="gone sized" /><ui:Image name="Loose" /></ui:VisualElement></ui:UXML>`);
+  const m = runJob(job('mixed', { uxml: 'Mixed.uxml', panel: { width: 300, height: 200 } }));
+  expect(m.code === 1, `a visible zero-size child next to a hidden one → 1 (got ${m.code})`);
+  const pm = pageOf('mixed');
+  expect(!/^Pass/.test(pm.verdict) && pm.channels['Collapsed to zero size'].count === 2,
+    'and the page does not pass it either: ' + pm.verdict);
+}
+
+console.log('\nstates come from the job, and a state that cannot be applied is not a judgement');
+{
+  writeFileSync(TMP + 'Styles/U.uss', '#Panel { width: 300px; height: 200px; }\n#Use { width: 80px; }\n#Use:hover { width: 140px; }');
+  writeFileSync(TMP + 'Use.uxml', `<ui:UXML xmlns:ui="UnityEngine.UIElements"><Style src="Styles/U.uss" />
+    <ui:VisualElement name="Panel"><ui:Button name="Use" text="Use" /></ui:VisualElement></ui:UXML>`);
+  const base = { uxml: 'Use.uxml', panel: { width: 400, height: 300 } };
+  const ok = runJob(job('states', { ...base, states: { '#Use': ['hover'] }, activeStates: ['disabled'] }));
+  expect(ok.code === 0, `a job with states runs → 0 (got ${ok.code})`);
+  const line = ok.out.split('\n')[1];
+  expect(line === 'states: #Use :hover   every element :disabled', 'the second line of the report names them: ' + line);
+  const pg = pageOf('states');
+  expect(pg.applied === line, 'and the page shows the same line: ' + pg.applied);
+  const none = runJob(job('nostates', base));
+  expect(none.code === 0 && none.out.split('\n')[1] === 'states: none applied (the default)',
+    'omitted, the report says so and nothing else changes');
+
+  const refused = [
+    [{ states: { '#Use': 'hover' } }, /must be an array.*the string "hover"/, 'a string where an array belongs'],
+    [{ activeStates: { hover: true } }, /activeStates must be an array/, 'activeStates not an array'],
+    [{ states: { '#Nope': ['hover'] } }, /"#Nope" matches no element/, 'a key matching nothing'],
+    [{ states: { '#Use[x]': ['hover'] } }, /"#Use\[x\]" is not a usable USS selector/, 'a key the core refuses as a selector'],
+    [{ states: { '#Use': ['pressed'] } }, /"pressed", which is not a Unity state/, 'a state Unity does not have'],
+  ];
+  refused.forEach(([extra, re, what], i) => {
+    const r = runJob(job('refuse' + i, { ...base, ...extra }));
+    expect(r.code === 2 && re.test(r.out), `${what} → 2, and the message says which and why (got ${r.code})`);
+  });
+}
+
 console.log('\nG — the cap is never silent');
 {
   const p = job('cap', {
     uxml: 'demo/Inventory.uxml', panel: { width: 480, height: 320 },
     assets: { 'Art/potion.png': 'demo/Art/potion.png' },
   });
-  // 0-byte cap is simulated by pointing at a file bigger than the limit is not
-  // possible here, so assert the happy path reports the injection instead, and
-  // that a missing file is reported rather than dropped.
+  // The budget itself is exercised under "code 3" below. Here: the happy path
+  // reports the injection, and a missing file stops the run. It used to be a
+  // problem (1), which told the caller to fix a document that was fine; the
+  // fault is in the job's paths, the same kind as a missing UXML, so it is 2.
+  // Every missing file is named in one go, not just the first.
   const p2 = job('capmiss', {
     uxml: 'demo/Inventory.uxml', panel: { width: 480, height: 320 },
-    assets: { 'Art/potion.png': 'demo/Art/gone.png' },
+    assets: { 'Art/potion.png': 'demo/Art/gone.png', 'Art/ok.png': 'demo/Art/potion.png', 'Art/bg.png': 'demo/Art/also-gone.png' },
   });
-  let out = '';
-  try { out = execFileSync('node', [ROOT + 'scripts/preview.mjs', p2], { encoding: 'utf8' }); }
-  catch (e) { out = e.stdout; }
-  expect(/asset not embedded/.test(out) && /file not found/.test(out),
-    'an asset that could not be embedded says so');
-  expect(exitOf(p2) === 1, 'and it counts as a problem, not a shrug');
+  const miss = runJob(p2);
+  expect(miss.code === 2, `a missing asset file → 2, the job points at nothing (got ${miss.code})`);
+  expect(/2 asset file\(s\) named in the job do not exist/.test(miss.out) &&
+    /Art\/potion\.png: demo\/Art\/gone\.png/.test(miss.out) && /Art\/bg\.png: demo\/Art\/also-gone\.png/.test(miss.out) &&
+    !/Art\/ok\.png:/.test(miss.out), 'and both missing files are named in one report, the present one is not');
+  expect(/No preview was written/.test(miss.out), 'and it says no preview was written');
+  for (const [bad, what] of [['Art/x.png', 'a string'], [[1], 'an array'], [{ 'Art/x.png': 5 }, 'a non-string file']]) {
+    const r = runJob(job('capbad', { uxml: 'demo/Inventory.uxml', panel: { width: 480, height: 320 }, assets: bad }));
+    expect(r.code === 2 && /assets must/.test(r.out), `assets that are ${what} → 2, refused by name (got ${r.code})`);
+  }
+  mutate('scripts/preview.mjs', '  if (missing.length) {', '  if (false) {', () => {
+    // Still a 2 — reading the missing file throws and the safety net catches
+    // it — but as a stack trace about one file, not a report naming them all.
+    const r = runJob(p2);
+    expect(!/named in the job do not exist/.test(r.out),
+      `mutation (missing files not refused) → only a crash about one file is left (exit ${r.code}), so the case above catches it`);
+  });
+  mutate('scripts/preview.mjs', "const missing = Object.entries(job.assets).filter(([, f]) => !existsSync(at(f)));",
+    "const missing = Object.entries(job.assets).filter(([, f]) => !existsSync(at(f))).slice(0, 1);", () =>
+    expect(!/Art\/bg\.png: /.test(runJob(p2).out), 'mutation (stop at the first missing file) → the second is not named, so the case above catches it'));
   expect(exitOf(p) === 0, 'while a good asset passes');
+}
+
+console.log('\ncode 3 — ran, no defect, but the budget kept an image out of the preview');
+{
+  const { readFileSync } = await import('node:fs');
+  const { createHash } = await import('node:crypto');
+  const MB = 1024 * 1024;
+  mkdirSync(TMP + 'big', { recursive: true });
+  // Made here, at run time, so nothing outside the checkout is read and nothing
+  // large is committed. Content is irrelevant to the budget, only size counts.
+  const big = (name, mb) => { const f = TMP + 'big/' + name; writeFileSync(f, Buffer.alloc(Math.round(mb * MB), 7)); return 'big/' + name; };
+  const one = big('one.png', 1), five = big('five.png', 5), three1 = big('three1.png', 3), three2 = big('three2.png', 3), half = big('half.png', 0.5);
+  const hash = (f) => createHash('sha256').update(readFileSync(TMP + f)).digest('hex');
+  const before = hash(five);
+  const inv = { uxml: 'demo/Inventory.uxml', panel: { width: 480, height: 320 } };
+
+  const within = runJob(job('b-within', { ...inv, assets: { 'Art/potion.png': one } }));
+  expect(within.code === 0 && /assets embedded 1/.test(within.out), `a 1 MB image is within the default budget → 0 (got ${within.code})`);
+
+  const over = runJob(job('b-over', { ...inv, assets: { 'Art/potion.png': five } }));
+  expect(over.code === 3, `only a 5 MB image over the 4 MB default per-file budget → 3 (got ${over.code})`);
+  expect(/problems \(0\)/.test(over.out), 'and it is not among the problems');
+  expect(/over the embed budget \(1\)/.test(over.out) && /Art\/potion\.png \(big\/five\.png, 5\.00 MB\): 5\.00 MB is over the 4 MB per-file budget\s+\[budget 4 MB per file, 16 MB total\]/.test(over.out),
+    'it is listed with path, size, reason and the budget applied');
+  const po = pageOf('b-over');
+  expect(/^Incomplete preview/.test(po.verdict) && po.colour === 'var(--blue)', 'the page calls it incomplete, neither pass nor problem: ' + po.verdict);
+  expect(po.channels['Over the embed budget'].count === 1 && po.channels['Collapsed to zero size'].count === 0,
+    'and lists it in its own channel, not among the problems');
+  expect(hash(five) === before, 'the source file is untouched');
+
+  const both = runJob(job('b-both', { uxml: 'Collapse.uxml', panel: { width: 300, height: 200 }, assets: { 'Art/x.png': five } }));
+  expect(both.code === 1, `over the budget and a collapsed element → 1, a defect outranks it (got ${both.code})`);
+  expect(/^Attention/.test(pageOf('b-both').verdict), 'and the page agrees');
+
+  const raised = runJob(job('b-raised', { ...inv, assets: { 'Art/potion.png': five }, assetBudget: { perFileMB: 8 } }));
+  expect(raised.code === 0 && /assets embedded 1/.test(raised.out), `raising perFileMB to 8 embeds it → 0 (got ${raised.code})`);
+  expect(/^Pass/.test(pageOf('b-raised').verdict), 'and the page passes');
+
+  const total = runJob(job('b-total', { ...inv, assetBudget: { totalMB: 5 },
+    assets: { 'Art/potion.png': three1, 'Art/b.png': three2, 'Art/c.png': half } }));
+  expect(total.code === 3, `two 3 MB images against a 5 MB total budget → 3 (got ${total.code})`);
+  expect(/Art\/b\.png .*would bring the embedded total to 6\.00 MB, over the 5 MB total budget \(3\.00 MB already embedded\)/.test(total.out),
+    'the one that did not fit says by how much, against the total');
+  expect(/assets embedded 2/.test(total.out), 'and a smaller file after it still fits — the message no longer claims the cap "was reached"');
+
+  for (const [bad, what] of [[{ perFileMB: -1 }, 'negative'], [{ totalMB: 0 }, 'zero'], [{ perFileMB: '4' }, 'a string'],
+                             [{ sizeMB: 4 }, 'an unknown key'], [[4, 16], 'an array'], [null, 'null']]) {
+    const r = runJob(job('b-bad', { ...inv, assets: { 'Art/potion.png': one }, assetBudget: bad }));
+    expect(r.code === 2 && /assetBudget/.test(r.out), `a budget that is ${what} → 2, refused by name (got ${r.code})`);
+  }
+
+  mutate('src/check.js', "    var overBudget = meta.overBudget || [];\n", "    var overBudget = meta.overBudget || [];\n    overBudget.forEach(function (a) { push('over budget: ' + a.path); });\n", () =>
+    expect(runJob(TMP + 'b-over.json').code === 1, 'mutation (over budget counted as a problem) → the 3 case becomes 1'));
+  mutate('src/check.js', 'code: problems.length ? 1 : overBudget.length ? 3 : 0', 'code: overBudget.length ? 3 : problems.length ? 1 : 0', () =>
+    expect(runJob(TMP + 'b-both.json').code === 3, 'mutation (3 outranks 1) → the defect case becomes 3'));
+  mutate('scripts/preview.mjs', '    budget[k] = v;', '', () =>
+    expect(runJob(TMP + 'b-raised.json').code === 3, 'mutation (the job budget is ignored) → the raised case stays 3'));
+  mutate('scripts/preview.mjs', "if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) {", 'if (false) {', () =>
+    expect(runJob(job('b-neg', { ...inv, assets: { 'Art/potion.png': one }, assetBudget: { perFileMB: -1 } })).code !== 2,
+      'mutation (no value check) → a negative budget is run instead of refused'));
+  mutate('scripts/preview.mjs', 'if (assetTotal + buf.length > totalLimit) {', 'if (false) {', () =>
+    expect(runJob(TMP + 'b-total.json').code === 0, 'mutation (no total check) → the total case passes'));
+  mutate('src/page.html', '} else if (verdict.code === 3) {', '} else if (false) {', () => {
+    runJob(TMP + 'b-over.json');
+    expect(/^Pass/.test(pageOf('b-over').verdict), 'mutation (page ignores 3) → the page passes an incomplete preview');
+  });
+  runJob(TMP + 'b-over.json');                       // leave the page as the real code writes it
 }
 
 console.log('\nA — the page the human opens is the code we verified');
@@ -120,7 +413,11 @@ console.log('\nA — the page the human opens is the code we verified');
   const orig = readFileSync(tpl, 'utf8');
   try {
     writeFileSync(tpl, orig.replace('var UXML_INPUT = "__INPUT__";', 'var UXML_INPUT = "__INPUT__"null;'));
-    expect(exitOf(goodJob) === 2, 'mutation (unparseable page) → 2, the page is never written silently');
+    rmSync(TMP + 'out/preview.html', { force: true });
+    const pg = runJob(goodJob);
+    expect(pg.code === 2, 'mutation (unparseable page) → 2, the page is never written silently');
+    expect(/No preview was written/.test(pg.out) && !/may still be produced/.test(pg.out) && !existsSync(TMP + 'out/preview.html'),
+      'and the refusal says no page was written, which is true');
   } finally { writeFileSync(tpl, orig); }
   expect(exitOf(goodJob) === 0, 'and it recovers');
 }

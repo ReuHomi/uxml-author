@@ -1,9 +1,11 @@
 // node scripts/bind-csharp.mjs job.json
 //
-// Same exit-code contract as preview.mjs:
+// Same meaning for the codes it shares with preview.mjs; bind uses only 0, 1
+// and 2 — it embeds no images, so preview's code 3 never arises here:
 //   0  ran, nothing needs your attention
 //   1  ran, something needs a change in your C#
-//   2  DID NOT RUN — no contract was reconciled, nothing was written
+//   2  DID NOT RUN — no contract was reconciled; also an unexpected error, which
+//      says what, if anything, it had written before stopping
 //
 // The generator owns field names. A model choosing them is the drift this whole
 // file exists to prevent: the design gets redrawn, the names wobble, and
@@ -17,23 +19,71 @@ import { parseContract, serializeContract, reconcile, csharpTypeFor, isKnownUnit
 // See preview.mjs: .pathname breaks on Windows.
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
+// What this run has put on disk so far. A refusal used to say "Nothing was
+// written" unconditionally, which stopped being true the moment a template
+// failed to fill after Bindings.cs had already gone out.
+const written = [];
+function write(path, text) { writeFileSync(path, text); written.push(path); }
+function onDisk() {
+  return written.length
+    ? `  Written before this, and now out of step with each other: ${written.join(', ')}. Regenerate once the cause is fixed.`
+    : '  Nothing was written. The existing contract is untouched.';
+}
+
 function cannotRun(msg, hint) {
   console.error('DID NOT RUN — ' + msg);
   if (hint) console.error('  ' + hint);
-  console.error('  Nothing was written. The existing contract is untouched.');
+  console.error(onDisk());
   process.exit(2);
 }
+
+// Node ends a process that dies of an unexpected error with exit code 1, and 1
+// here means "ran, and something needs a change in your C#". A crash decided
+// nothing, so it leaves as 2 — see the same net in preview.mjs.
+let dying = false;
+function unexpected(e) {
+  if (dying) return;
+  dying = true;
+  process.exitCode = 2;
+  console.error('DID NOT RUN — stopped on an unexpected error: ' + ((e && e.stack) || String(e)));
+  console.error('  This is not a finding about the UXML or the C#. The run broke before reaching one.');
+  console.error(onDisk());
+  process.exit(2);
+}
+process.on('uncaughtException', unexpected);
+process.on('unhandledRejection', unexpected);
 
 const jobPath = process.argv[2];
 if (!jobPath || !existsSync(jobPath)) cannotRun('no job file at ' + jobPath);
 let job;
 try { job = JSON.parse(readFileSync(jobPath, 'utf8')); }
 catch (e) { cannotRun('job file is not valid JSON: ' + e.message); }
+if (job === null || typeof job !== 'object' || Array.isArray(job)) {
+  const got = job === null ? 'null' : Array.isArray(job) ? 'an array' : `a ${typeof job} (${JSON.stringify(job)})`;
+  cannotRun(`the job file must hold a JSON object such as { "uxml": "Screen.uxml", "className": "…" }, but it holds ${got}`);
+}
 
 const base = dirname(resolve(jobPath));
 const at = (p) => resolve(base, p);
 
 if (!job.uxml || !existsSync(at(job.uxml))) cannotRun('no UXML at ' + job.uxml);
+
+// renames reach Object.entries, which takes anything: a string becomes one
+// "rename" per letter, an array one per index, and the contract records them
+// as intended changes. Refused here, by name, before anything is read.
+if (job.renames !== undefined) {
+  const r = job.renames;
+  if (r === null || typeof r !== 'object' || Array.isArray(r)) {
+    const got = r === null ? 'null' : Array.isArray(r) ? 'an array ' + JSON.stringify(r)
+      : typeof r === 'string' ? 'the string ' + JSON.stringify(r) : `a ${typeof r} (${JSON.stringify(r)})`;
+    cannotRun(`renames must be an object mapping an old name to a new one, such as { "UseButton": "ConfirmButton" }, got ${got}`);
+  }
+  const bad = Object.entries(r).filter(([, to]) => typeof to !== 'string' || !to);
+  if (bad.length) {
+    cannotRun('renames must map each old name to a new name; not a name: ' +
+      bad.map(([from, to]) => `${JSON.stringify(from)} -> ${JSON.stringify(to)}`).join(', '));
+  }
+}
 const uxmlText = readFileSync(at(job.uxml), 'utf8');
 const uxmlName = basename(job.uxml);
 
@@ -171,7 +221,7 @@ const common = {
 };
 
 mkdirSync(outDir, { recursive: true });
-writeFileSync(bindingsPath, fill('Bindings.cs.tmpl', {
+write(bindingsPath, fill('Bindings.cs.tmpl', {
   ...common, FIELDS: fields, QUERIES: queries, SUBSCRIBE: subscribe,
   UNSUBSCRIBE: unsubscribe, DECLARATIONS: declarations, WRAPPERS: wrappers,
 }));
@@ -180,9 +230,9 @@ writeFileSync(bindingsPath, fill('Bindings.cs.tmpl', {
 // into it would turn every regeneration into a chance to eat someone's work,
 // and a botched merge is a quieter failure than no merge at all.
 const logicExisted = existsSync(logicPath);
-if (!logicExisted) writeFileSync(logicPath, fill('Logic.cs.tmpl', { ...common, HANDLERS: handlers }));
+if (!logicExisted) write(logicPath, fill('Logic.cs.tmpl', { ...common, HANDLERS: handlers }));
 
-writeFileSync(contractPath, serializeContract(job.title || uxmlName, rows));
+write(contractPath, serializeContract(job.title || uxmlName, rows));
 
 // ── report ───────────────────────────────────────────────────────────────────
 const L = (s) => console.log(s);

@@ -6,7 +6,14 @@
 // EXIT CODE IS THE CONTRACT:
 //   0  gate ran, everything passed
 //   1  gate ran, something failed — collapse, overflow, unsupported, bad sheet
-//   2  GATE DID NOT RUN — no judgement was made about this output
+//   2  GATE DID NOT RUN — no judgement was made about this output, or not under
+//      the conditions the job asked for (a state or budget that cannot be applied),
+//      or the run broke on an unexpected error before deciding anything
+//   3  gate ran, no defect, but the preview is incomplete: an image was over the
+//      embed budget. The budget needs adjusting, not the document.
+//
+// Precedence when more than one holds: 2 over 1 over 3 over 0. A defect and
+// an over-budget image together are 1 — the defect is the news.
 //
 // 1 and 2 must never be merged. "checked and found a problem" and "never
 // checked" look identical to a caller that only tests for zero, and the second
@@ -19,15 +26,67 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // which fs cannot open. Unity development is largely a Windows activity, so
 // this is not an edge case here.
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const PER_ASSET_LIMIT = 512 * 1024;   // bytes on disk, before base64
-const TOTAL_ASSET_LIMIT = 2 * 1024 * 1024;
+// Bytes on disk, before base64. 1 MB here is 1024 × 1024 bytes.
+const MB = 1024 * 1024;
+const DEFAULT_BUDGET = { perFileMB: 4, totalMB: 16 };
+const mb = (bytes) => (bytes / MB).toFixed(2) + ' MB';
+
+// Known once the job is read; null before that.
+let outPath = null;
+// Set the moment the page is on disk, so a failure after it says so.
+let pageWritten = false;
+// The happy-dom window, once there is one — the safety net closes it.
+let w = null;
+
+// Every refusal happens before the page is written, so a run that ends here
+// never produces a preview. The old closing line said the files "may still be
+// produced", which was never true and invited the worse mistake: a preview
+// left at the same path by an earlier run looks exactly like this run's output.
+// So the message says what is on disk, and whose it is.
+function onDisk() {
+  if (pageWritten) {
+    return `  A preview was written to ${outPath} before this, but the run did not finish; do not present it as checked.`;
+  }
+  if (outPath && existsSync(outPath)) {
+    return `  No preview was written by this run. The file already at ${outPath} is from an earlier run, and nothing has checked it against these files.`;
+  }
+  return '  No preview was written, and nothing was checked.';
+}
 
 function cannotRun(msg, hint) {
   console.error('CANNOT VERIFY — ' + msg);
   if (hint) console.error('  ' + hint);
-  console.error('  The files may still be produced, but nothing has checked them.');
+  console.error(onDisk());
   process.exit(2);
 }
+
+// ── the safety net ──────────────────────────────────────────────────────────
+// Node ends a process that dies of an unexpected error with exit code 1, and 1
+// here means "checked, and found a problem in the document". A crash is the
+// opposite of that — nothing was decided — so it must leave as 2. Every
+// unexpected error reaches one of these two hooks; an ES module's top-level
+// throw and a rejected top-level await arrive as well (measured on Node 22).
+//
+// The happy-dom window is closed on the way out if there is one: leaving it
+// open across process teardown is the Windows crash hazard noted in
+// tests/conditions.mjs, and a native crash would replace this exit code with
+// whatever the OS reports. The close is bounded, so a close that hangs cannot
+// hold the process, and a second failure during it cannot re-enter.
+let dying = false;
+async function unexpected(e) {
+  if (dying) return;
+  dying = true;
+  process.exitCode = 2;
+  console.error('CANNOT VERIFY — the check stopped on an unexpected error: ' + ((e && e.stack) || String(e)));
+  console.error('  This is not a judgement of the UXML or USS. The run broke before reaching one, so nothing about them was decided.');
+  console.error(onDisk());
+  try {
+    if (w) await Promise.race([w.happyDOM.close(), new Promise((r) => setTimeout(r, 2000))]);
+  } catch { /* the exit code is already 2; a failed close must not change it */ }
+  process.exit(2);
+}
+process.on('uncaughtException', unexpected);
+process.on('unhandledRejection', unexpected);
 
 // ── job ─────────────────────────────────────────────────────────────────────
 const jobPath = process.argv[2];
@@ -36,13 +95,59 @@ let job;
 try { job = JSON.parse(readFileSync(jobPath, 'utf8')); }
 catch (e) { cannotRun('job file is not valid JSON: ' + e.message); }
 
+// A job that is not an object would otherwise reach `job.out` and die of a
+// TypeError. The safety net would turn that into a 2 as well, but a refusal
+// that says what is wrong with the file is worth more than a stack trace.
+if (job === null || typeof job !== 'object' || Array.isArray(job)) {
+  const got = job === null ? 'null' : Array.isArray(job) ? 'an array' : `a ${typeof job} (${JSON.stringify(job)})`;
+  cannotRun(`the job file must hold a JSON object such as { "uxml": "Screen.uxml", "panel": { … } }, but it holds ${got}`);
+}
+
 const base = dirname(resolve(jobPath));
 const at = (p) => resolve(base, p);
+if (job.out !== undefined && typeof job.out !== 'string') cannotRun('out must be a file path, got ' + JSON.stringify(job.out));
+outPath = at(job.out || 'preview.html');
 
 if (!job.panel || !job.panel.width || !job.panel.height) {
   cannotRun('no panel size', 'Every % and stretch in the USS is measured against it; there is no safe default.');
 }
 if (!job.uxml || !existsSync(at(job.uxml))) cannotRun('no UXML at ' + job.uxml);
+
+// A budget the job got wrong is a job that cannot be run as written. Falling
+// back to the default would check a different preview from the one asked for.
+const budget = { ...DEFAULT_BUDGET };
+if (job.assetBudget !== undefined) {
+  const b = job.assetBudget;
+  if (b === null || typeof b !== 'object' || Array.isArray(b)) {
+    cannotRun('assetBudget must be an object like { "perFileMB": 8, "totalMB": 32 }, got ' + JSON.stringify(b));
+  }
+  for (const [k, v] of Object.entries(b)) {
+    if (!(k in DEFAULT_BUDGET)) cannotRun(`assetBudget.${k} is not a budget; use perFileMB and/or totalMB`);
+    if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) {
+      cannotRun(`assetBudget.${k} must be a positive number of MB, got ${JSON.stringify(v)}`);
+    }
+    budget[k] = v;
+  }
+}
+
+// An asset the job names and the disk does not have is a job that points at
+// nothing — the same kind of fault as a missing UXML — not a defect in the
+// screen. It used to be counted among the screen's problems and exit 1, which
+// told the caller to fix a document that was fine. Every missing file is
+// listed at once, so one run says everything that is wrong with the paths.
+if (job.assets !== undefined) {
+  if (job.assets === null || typeof job.assets !== 'object' || Array.isArray(job.assets)) {
+    cannotRun('assets must be an object mapping the path the USS uses to a file, got ' + JSON.stringify(job.assets));
+  }
+  const bad = Object.entries(job.assets).filter(([, f]) => typeof f !== 'string');
+  if (bad.length) cannotRun('assets must map each path to a file name; not a string: ' + bad.map(([k]) => k).join(', '));
+  const missing = Object.entries(job.assets).filter(([, f]) => !existsSync(at(f)));
+  if (missing.length) {
+    cannotRun(`${missing.length} asset file(s) named in the job do not exist:\n` +
+      missing.map(([k, f]) => `  - ${k}: ${f} (looked for ${at(f)})`).join('\n'),
+      'Fix the paths in assets, or remove the entries for images you do not have. An image the USS asks for and the job does not supply is drawn as not yet present, which is fine.');
+  }
+}
 const uxml = readFileSync(at(job.uxml), 'utf8');
 
 // ── environment ─────────────────────────────────────────────────────────────
@@ -50,9 +155,9 @@ let Window;
 try { ({ Window } = await import('happy-dom')); }
 catch {
   cannotRun('happy-dom is not installed, so there is no DOM to render into',
-    'Run `npm install happy-dom`. Until then the preview HTML still works — it renders in the browser — but no machine has looked at it.');
+    'Run `npm install happy-dom`. The preview page is written only after the check runs, so there is none from this run.');
 }
-const w = new Window({ url: 'http://localhost' });
+w = new Window({ url: 'http://localhost' });
 Object.assign(globalThis, {
   window: w, document: w.document, HTMLElement: w.HTMLElement,
   Node: w.Node, getComputedStyle: w.getComputedStyle.bind(w),
@@ -145,21 +250,28 @@ for (const [key, text] of Object.entries(templates)) {
   });
 }
 
-// ── encode assets, with a cap that is never silent ──────────────────────────
+// ── encode assets, within a budget that is never silent ─────────────────────
+// Every file named here exists by now; a missing one stopped the run above. A
+// file over the budget is fine — the preview is just short of it — so it goes
+// to its own list, which on its own makes the exit code 3, not 1.
+// Files are read, never written: nothing here converts or replaces a source.
 const MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp' };
 const assets = {};
-const assetSkipped = [];
+const overBudget = [];
+const perFileLimit = budget.perFileMB * MB, totalLimit = budget.totalMB * MB;
 let assetTotal = 0;
 for (const [uxmlPath, file] of Object.entries(job.assets || {})) {
   const abs = at(file);
-  if (!existsSync(abs)) { assetSkipped.push({ path: uxmlPath, why: 'file not found: ' + file }); continue; }
   const buf = readFileSync(abs);
-  if (buf.length > PER_ASSET_LIMIT) {
-    assetSkipped.push({ path: uxmlPath, why: `${(buf.length / 1024).toFixed(0)} KB exceeds the ${PER_ASSET_LIMIT / 1024} KB per-file cap` });
+  const over = (why) => overBudget.push({ path: uxmlPath, file, bytes: buf.length, why, budget: { ...budget } });
+  if (buf.length > perFileLimit) {
+    over(`${mb(buf.length)} is over the ${budget.perFileMB} MB per-file budget`);
     continue;
   }
-  if (assetTotal + buf.length > TOTAL_ASSET_LIMIT) {
-    assetSkipped.push({ path: uxmlPath, why: 'the total embedded-asset cap was already reached' });
+  // Files are taken in job order, and one that does not fit does not stop the
+  // ones after it: a smaller file later in the list can still be embedded.
+  if (assetTotal + buf.length > totalLimit) {
+    over(`would bring the embedded total to ${mb(assetTotal + buf.length)}, over the ${budget.totalMB} MB total budget (${mb(assetTotal)} already embedded)`);
     continue;
   }
   assetTotal += buf.length;
@@ -167,37 +279,41 @@ for (const [uxmlPath, file] of Object.entries(job.assets || {})) {
   assets[uxmlPath] = `data:${MIME[ext] || 'application/octet-stream'};base64,${buf.toString('base64')}`;
 }
 
+// ── states ──────────────────────────────────────────────────────────────────
+// Judged in check.js, where the page judges them too. A state that cannot be
+// applied means the screen we would check is not the one asked about, so the
+// answer is "did not run", not a finding about the document.
+const stateInput = { uxml, sheets, templates, states: job.states, activeStates: job.activeStates };
+{
+  let st;
+  try { st = check.checkStates(core, stateInput); }
+  catch (e) { cannotRun('the requested states could not be checked: ' + e.message); }
+  if (st.errors.length) {
+    cannotRun('the requested states cannot be applied, so this is not the screen asked about:\n  - ' +
+      st.errors.join('\n  - '));
+  }
+}
+
 // ── the gate ────────────────────────────────────────────────────────────────
-const input = { uxml, sheets, templates, assets, panel: job.panel };
+// `states` and `activeStates` travel as plain JSON on the input, so the page
+// inlines exactly what was checked here and converts it the same way.
+const input = { uxml, sheets, templates, assets, panel: job.panel,
+                states: stateInput.states, activeStates: stateInput.activeStates };
 let res;
 try { res = check.run(core, w.document.createElement('div'), input); }
 catch (e) { cannotRun('the render threw: ' + e.message); }
 
-const problems = [];
-const push = (t) => problems.push(t);
-
-if (res.painted.childCount === 0) push('nothing was painted');
-if (res.painted.elementCount !== res.painted.boxCount) {
-  push(`${res.painted.boxCount - res.painted.elementCount} laid-out node(s) were never painted`);
-}
-if (res.unindexed.length) {
-  push(`${res.unindexed.length} laid-out node(s) are absent from the indexed tree — the checks below skipped them, so this report is incomplete in a way it cannot describe`);
-}
-if (res.ambiguousDeps.length) {
-  res.ambiguousDeps.forEach((a) => push(`"${a.url}" names two different documents (${a.was} and ${a.now}); one of them was not loaded`));
-}
-if (templateMisses.length) push(`${templateMisses.length} template document(s) could not be read — the instances they fill are missing from the screen entirely, not merely unstyled`);
-if (sheetMisses.length) push(`${sheetMisses.length} stylesheet(s) could not be read — the coordinates below are wrong, not merely incomplete`);
-res.collapsed.forEach((c) => push(`<${c.type}> #${c.name} has no size and is invisible`));
-res.overflow.forEach((c) => push(`<${c.type}> #${c.name} runs outside the panel`));
-res.other.forEach((x) => push(`${x.kind}: ${x.message}`));
-assetSkipped.forEach((a) => push(`asset not embedded — ${a.path}: ${a.why}`));
+// The verdict is check.js's, so the page reaches the same one.
+const meta = { sheetMisses, templateMisses, overBudget, injectedNote: res.injected };
+const verdict = check.judge(res, meta);
+const problems = verdict.problems;
 
 res.dispose();
 
 // ── report ──────────────────────────────────────────────────────────────────
 const L = (s) => console.log(s);
 L(`panel ${job.panel.width}x${job.panel.height}   sheets ${Object.keys(sheets).length}   templates ${Object.keys(templates).length}   assets embedded ${Object.keys(assets).length}`);
+L(check.describeStates(res.applied));
 
 L(`\nnot drawn by this version (${res.unsupported.length}) — invisible here, visible in Unity; this list is the only trace`);
 res.unsupported.forEach((x) => L('  - ' + x.message));
@@ -223,6 +339,18 @@ res.unsupported.forEach((x) => L('  - ' + x.message));
   }
 }
 
+// Hidden is never a defect and never silent: a class typo hides an element
+// just as well as an intended state does, and only a person can tell which.
+L(`\nhidden by display: none (${res.hidden.length}) — not a problem; check each one is meant to be hidden`);
+res.hidden.forEach((h) => L(`  - <${h.type}> #${h.name} — ` +
+  (h.by.self ? 'itself' : `inside #${h.by.name || '(unnamed ' + h.by.type + ')'}`) + `, by ${h.origin}`));
+
+if (res.emptied.length) {
+  L(`\nemptied by hidden children (${res.emptied.length}) — zero size only because everything inside it is hidden; not a problem`);
+  res.emptied.forEach((e) => L(`  - <${e.type}> #${e.name}`));
+  L('  If that is not the state you meant, check the rules that hide its children.');
+}
+
 if (res.versionDependent.length) {
   L(`\nmeasured on Unity 6000.0.40f1 (${res.versionDependent.length}) — a standing condition, not a problem`);
   res.versionDependent.forEach((x) => L('  - ' + x.message));
@@ -239,8 +367,16 @@ if (res.injected.length) {
 L(`\nproblems (${problems.length})`);
 problems.forEach((p) => L('  - ' + p));
 
+// Listed apart from problems on purpose: the document is not at fault, the
+// preview is short of an image. The fix is a bigger budget or a smaller file,
+// never an edit to the UXML or USS.
+if (overBudget.length) {
+  L(`\nover the embed budget (${overBudget.length}) — the preview is incomplete, not the document; these are drawn as not yet present`);
+  overBudget.forEach((a) => L(`  - ${a.path} (${a.file}, ${mb(a.bytes)}): ${a.why}   [budget ${a.budget.perFileMB} MB per file, ${a.budget.totalMB} MB total]`));
+  L('  Raise assetBudget in the job to include them; the source files are never changed.');
+}
+
 // ── the human's copy ────────────────────────────────────────────────────────
-const outPath = at(job.out || 'preview.html');
 mkdirSync(dirname(outPath), { recursive: true });
 const coreSrc = readFileSync(ROOT + 'src/core.bundle.js', 'utf8');
 const checkSrc = readFileSync(ROOT + 'src/check.js', 'utf8');
@@ -253,7 +389,7 @@ const page = readFileSync(ROOT + 'src/page.html', 'utf8')
   .replace('"__INPUT__"', () => JSON.stringify({
     ...input,
     title: job.title || job.uxml,
-    meta: { sheetMisses, templateMisses, assetSkipped, injectedNote: res.injected },
+    meta,
   }));
 // The inlined copies must be byte-identical to their sources, and every block
 // must actually parse. A page that silently fails to run is worse than no page:
@@ -267,6 +403,7 @@ const page = readFileSync(ROOT + 'src/page.html', 'utf8')
   });
 }
 writeFileSync(outPath, page);
+pageWritten = true;
 L(`\npreview → ${outPath}  (${(page.length / 1024).toFixed(0)} KB)`);
 
 // See tests/conditions.mjs: leaving happy-dom open across process teardown is
@@ -274,4 +411,4 @@ L(`\npreview → ${outPath}  (${(page.length / 1024).toFixed(0)} KB)`);
 // with whatever the OS reports.
 await w.happyDOM.close();
 
-process.exit(problems.length ? 1 : 0);
+process.exit(verdict.code);
