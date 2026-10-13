@@ -30,10 +30,22 @@ const MB = 1024 * 1024;
 const DEFAULT_BUDGET = { perFileMB: 4, totalMB: 16 };
 const mb = (bytes) => (bytes / MB).toFixed(2) + ' MB';
 
+// Known once the job is read; null before that.
+let outPath = null;
+
+// Every refusal happens before the page is written, so a run that ends here
+// never produces a preview. The old closing line said the files "may still be
+// produced", which was never true and invited the worse mistake: a preview
+// left at the same path by an earlier run looks exactly like this run's output.
+// So the message says what is on disk, and whose it is.
 function cannotRun(msg, hint) {
   console.error('CANNOT VERIFY — ' + msg);
   if (hint) console.error('  ' + hint);
-  console.error('  The files may still be produced, but nothing has checked them.');
+  if (outPath && existsSync(outPath)) {
+    console.error(`  No preview was written by this run. The file already at ${outPath} is from an earlier run, and nothing has checked it against these files.`);
+  } else {
+    console.error('  No preview was written, and nothing was checked.');
+  }
   process.exit(2);
 }
 
@@ -46,6 +58,7 @@ catch (e) { cannotRun('job file is not valid JSON: ' + e.message); }
 
 const base = dirname(resolve(jobPath));
 const at = (p) => resolve(base, p);
+outPath = at(job.out || 'preview.html');
 
 if (!job.panel || !job.panel.width || !job.panel.height) {
   cannotRun('no panel size', 'Every % and stretch in the USS is measured against it; there is no safe default.');
@@ -75,7 +88,7 @@ let Window;
 try { ({ Window } = await import('happy-dom')); }
 catch {
   cannotRun('happy-dom is not installed, so there is no DOM to render into',
-    'Run `npm install happy-dom`. Until then the preview HTML still works — it renders in the browser — but no machine has looked at it.');
+    'Run `npm install happy-dom`. The preview page is written only after the check runs, so there is none from this run.');
 }
 const w = new Window({ url: 'http://localhost' });
 Object.assign(globalThis, {
@@ -299,7 +312,6 @@ if (overBudget.length) {
 }
 
 // ── the human's copy ────────────────────────────────────────────────────────
-const outPath = at(job.out || 'preview.html');
 mkdirSync(dirname(outPath), { recursive: true });
 const coreSrc = readFileSync(ROOT + 'src/core.bundle.js', 'utf8');
 const checkSrc = readFileSync(ROOT + 'src/check.js', 'utf8');

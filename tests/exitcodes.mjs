@@ -4,7 +4,7 @@
 // image the budget kept out" — and it must never hide a 1.
 import { execFileSync, execFileSync as run } from 'node:child_process';
 import { writeFileSync, mkdirSync, renameSync, existsSync, rmSync,
-         readdirSync, copyFileSync } from 'node:fs';
+         readdirSync, copyFileSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 
@@ -50,6 +50,13 @@ function runJob(jobPath) {
   try { return { code: 0, out: execFileSync('node', [ROOT + 'scripts/preview.mjs', jobPath], { encoding: 'utf8', stdio: 'pipe' }) }; }
   catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
 }
+// Mutations rewrite a source file for one run and put it back. The replaced
+// text must be present, or the mutation tested nothing — that is a failure.
+function mutate(file, from, to, fn) {
+  const path = ROOT + file, orig = readFileSync(path, 'utf8');
+  if (!orig.includes(from)) { expect(false, `mutation target is present in ${file}: ${from}`); return; }
+  try { writeFileSync(path, orig.replace(from, to)); fn(); } finally { writeFileSync(path, orig); }
+}
 // What the page a person opens decided, read by actually running it.
 function pageOf(name) {
   return JSON.parse(execFileSync('node', [ROOT + 'tests/page-verdict.mjs', TMP + '../out/' + name + '.html'],
@@ -71,9 +78,72 @@ expect(exitOf(job('nouxml', { uxml: 'demo/Missing.uxml', panel: { width: 400, he
   let moved = false;
   try {
     if (existsSync(mod)) { renameSync(mod, hidden); moved = true; }
-    expect(exitOf(goodJob) === 2, 'happy-dom missing → 2, not a silent pass');
+    const hd = runJob(goodJob);
+    expect(hd.code === 2, 'happy-dom missing → 2, not a silent pass');
+    expect(!/may still be produced|preview HTML still works/.test(hd.out) && /No preview was written/.test(hd.out),
+      'and it does not claim a preview page exists');
   } finally { if (moved) renameSync(hidden, mod); }
   expect(exitOf(goodJob) === 0, 'and it recovers once happy-dom is back');
+}
+
+console.log('\nevery refusal says what is on disk, and none claims a file it did not write');
+{
+  const { readFileSync, statSync } = await import('node:fs');
+  // Each path that ends in code 2, grouped by where it stops. None of them
+  // writes the page; the message must say so, and must name a stale page left
+  // at the output path by an earlier run instead of letting it pass as new.
+  const OLD = /may still be produced/;
+  const NONE = /No preview was written, and nothing was checked\./;
+  const STALE = /No preview was written by this run\. The file already at .*stale\.html is from an earlier run/;
+  const inv = { uxml: 'demo/Inventory.uxml', panel: { width: 480, height: 320 } };
+  const paths = [
+    ['no job file', () => runJob(TMP + 'nope.json')],
+    ['unparseable job', () => runJob(TMP + 'bad.json')],
+    ['job format: no panel', () => runJob(job('r-nopanel', { uxml: 'demo/Inventory.uxml' }))],
+    ['job format: bad budget', () => runJob(job('r-budget', { ...inv, assetBudget: { perFileMB: 0 } }))],
+    ['states that cannot apply', () => runJob(job('r-states', { ...inv, states: { '#Nope': ['hover'] } }))],
+  ];
+  for (const [what, go] of paths) {
+    const r = go();
+    expect(r.code === 2 && NONE.test(r.out) && !OLD.test(r.out), `${what} → 2, "no preview was written", nothing about files being produced`);
+  }
+  for (const n of ['r-nopanel', 'r-budget', 'r-states']) {
+    expect(!existsSync(TMP + '../out/' + n + '.html'), `and ${n} really left no page behind`);
+  }
+
+  // A page from an earlier run sits at the output path. The refusal names it
+  // as old, and leaves it exactly as it was.
+  mkdirSync(TMP + '../out', { recursive: true });
+  const stalePath = TMP + '../out/stale.html';
+  for (const [what, extra] of [['bad budget', { assetBudget: { totalMB: -1 } }], ['states', { states: { '#Use': 'hover' } }],
+                               ['no panel', { panel: undefined }]]) {
+    writeFileSync(stalePath, '<!-- from an earlier run -->');
+    const before = statSync(stalePath).mtimeMs;
+    const p = TMP + 'stale.json';
+    writeFileSync(p, JSON.stringify({ ...inv, ...extra, out: '../out/stale.html' }));
+    const r = runJob(p);
+    expect(r.code === 2 && STALE.test(r.out) && !NONE.test(r.out),
+      `${what} with an old page at the output path → the message calls it an earlier run's, unchecked`);
+    expect(readFileSync(stalePath, 'utf8') === '<!-- from an earlier run -->' && statSync(stalePath).mtimeMs === before,
+      'and the old page is left untouched');
+  }
+  // mutations
+  mutate('scripts/preview.mjs', "    console.error('  No preview was written, and nothing was checked.');",
+    "    console.error('  The files may still be produced, but nothing has checked them.');", () => {
+      const r = runJob(job('r-nopanel', { uxml: 'demo/Inventory.uxml' }));
+      expect(OLD.test(r.out), 'mutation (the old closing line) → the no-panel case sees it and fails');
+    });
+  mutate('scripts/preview.mjs', '  if (outPath && existsSync(outPath)) {', '  if (false) {', () => {
+    writeFileSync(stalePath, '<!-- from an earlier run -->');
+    const r = runJob(TMP + 'stale.json');
+    expect(!STALE.test(r.out), 'mutation (stale page not looked for) → the earlier-run case catches it');
+  });
+  mutate('scripts/preview.mjs', "outPath = at(job.out || 'preview.html');\n", '', () => {
+    writeFileSync(stalePath, '<!-- from an earlier run -->');
+    const r = runJob(TMP + 'stale.json');
+    expect(!STALE.test(r.out), 'mutation (output path known only at the end) → the earlier-run case catches it');
+  });
+  rmSync(stalePath, { force: true });
 }
 
 console.log('\ncode 1 — gate ran, judgement failed');
@@ -226,13 +296,6 @@ console.log('\ncode 3 — ran, no defect, but the budget kept an image out of th
     expect(r.code === 2 && /assetBudget/.test(r.out), `a budget that is ${what} → 2, refused by name (got ${r.code})`);
   }
 
-  // Mutations. Each rewrites the source for one run and puts it back; the
-  // replaced text must be present, or the mutation tested nothing.
-  const mutate = (file, from, to, fn) => {
-    const path = ROOT + file, orig = readFileSync(path, 'utf8');
-    if (!orig.includes(from)) { expect(false, `mutation target is present in ${file}: ${from}`); return; }
-    try { writeFileSync(path, orig.replace(from, to)); fn(); } finally { writeFileSync(path, orig); }
-  };
   mutate('scripts/preview.mjs', 'const over = (why) => overBudget.push(', 'const over = (why) => assetSkipped.push(', () =>
     expect(runJob(TMP + 'b-over.json').code === 1, 'mutation (over budget counted as a problem) → the 3 case becomes 1'));
   mutate('src/check.js', 'code: problems.length ? 1 : overBudget.length ? 3 : 0', 'code: overBudget.length ? 3 : problems.length ? 1 : 0', () =>
@@ -270,7 +333,11 @@ console.log('\nA — the page the human opens is the code we verified');
   const orig = readFileSync(tpl, 'utf8');
   try {
     writeFileSync(tpl, orig.replace('var UXML_INPUT = "__INPUT__";', 'var UXML_INPUT = "__INPUT__"null;'));
-    expect(exitOf(goodJob) === 2, 'mutation (unparseable page) → 2, the page is never written silently');
+    rmSync(TMP + 'out/preview.html', { force: true });
+    const pg = runJob(goodJob);
+    expect(pg.code === 2, 'mutation (unparseable page) → 2, the page is never written silently');
+    expect(/No preview was written/.test(pg.out) && !/may still be produced/.test(pg.out) && !existsSync(TMP + 'out/preview.html'),
+      'and the refusal says no page was written, which is true');
   } finally { writeFileSync(tpl, orig); }
   expect(exitOf(goodJob) === 0, 'and it recovers');
 }

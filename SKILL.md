@@ -159,10 +159,12 @@ was measured against.
 
 Code 2 usually means `happy-dom` is missing (`npm install happy-dom`) or the
 panel size is absent. It also means the job asked for something that cannot be
-applied — a state or a budget it got wrong — and the message names which. The preview HTML still renders in a browser — it needs no
-Node — but no machine has looked at it. Say that out loud. A file presented as
-if it were checked, when it was not, is the failure this whole tool exists to
-prevent.
+applied — a state or a budget it got wrong — and the message names which. No
+preview is written on code 2. If a `preview.html` is already at the output path,
+it is from an earlier run and nothing checked it against the current files; the
+message says so. Say that out loud, and do not show the old file as if it were
+this run's. A file presented as if it were checked, when it was not, is the
+failure this whole tool exists to prevent.
 
 ## Reading the report
 
