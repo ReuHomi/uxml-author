@@ -194,6 +194,24 @@ section('the name is one name in every file that carries it');
     'the README uses the same name');
 }
 
+section('the version is one version wherever it is written');
+{
+  // The plugin manifests carry no version on purpose (a pinned one stopped
+  // updates reaching installs), so package.json is the one place it is set.
+  // The lockfile and the top changelog entry must follow it.
+  const pkg = JSON.parse(readFileSync(ROOT + 'package.json', 'utf8'));
+  const lock = JSON.parse(readFileSync(ROOT + 'package-lock.json', 'utf8'));
+  const top = readFileSync(ROOT + 'CHANGELOG.md', 'utf8').match(/^## (\d+\.\d+\.\d+)/m);
+  expect(lock.version === pkg.version && lock.packages[''].version === pkg.version,
+    `package-lock.json says ${lock.version} / ${lock.packages[''].version}, as package.json does (${pkg.version})`);
+  expect(!!top && top[1] === pkg.version, `the newest CHANGELOG entry is ${pkg.version} (found ${top && top[1]})`);
+  for (const f of ['.claude-plugin/plugin.json', '.claude-plugin/marketplace.json']) {
+    const m = JSON.parse(readFileSync(ROOT + f, 'utf8'));
+    expect(m.version === undefined && (m.plugins || []).every((p) => p.version === undefined),
+      `${f} still carries no version of its own`);
+  }
+}
+
 section('the lockfile can be installed as Claude Code installs it');
 {
   // Claude Code runs `npm ci --ignore-scripts` when it caches the plugin, and a
