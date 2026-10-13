@@ -128,8 +128,8 @@ console.log('\nevery refusal says what is on disk, and none claims a file it did
       'and the old page is left untouched');
   }
   // mutations
-  mutate('scripts/preview.mjs', "    console.error('  No preview was written, and nothing was checked.');",
-    "    console.error('  The files may still be produced, but nothing has checked them.');", () => {
+  mutate('scripts/preview.mjs', "  return '  No preview was written, and nothing was checked.';",
+    "  return '  The files may still be produced, but nothing has checked them.';", () => {
       const r = runJob(job('r-nopanel', { uxml: 'demo/Inventory.uxml' }));
       expect(OLD.test(r.out), 'mutation (the old closing line) → the no-panel case sees it and fails');
     });
@@ -144,6 +144,70 @@ console.log('\nevery refusal says what is on disk, and none claims a file it did
     expect(!STALE.test(r.out), 'mutation (output path known only at the end) → the earlier-run case catches it');
   });
   rmSync(stalePath, { force: true });
+}
+
+console.log('\nan unexpected error is code 2, never 1');
+{
+  // Node exits 1 on an unhandled error, and 1 is "checked, found a problem".
+  // Each case here is a run that decided nothing; each must say so with a 2.
+  const NOT_JUDGED = /not a judgement of the UXML or USS/;
+  for (const [text, what, re] of [['null', 'null', /holds null/], ['42', 'a number', /holds a number \(42\)/],
+                                   ['[{"uxml":"x"}]', 'an array', /holds an array/], ['"job.json"', 'a string', /holds a string \("job\.json"\)/]]) {
+    const p = TMP + 'shape.json';
+    writeFileSync(p, text);
+    const r = runJob(p);
+    expect(r.code === 2 && /must hold a JSON object/.test(r.out) && re.test(r.out) && !/TypeError/.test(r.out),
+      `a job that is ${what} → 2, refused by name rather than by a crash (got ${r.code})`);
+  }
+
+  const AFTER_CHECK = "catch (e) { cannotRun('the render threw: ' + e.message); }\n";
+  mutate('scripts/preview.mjs', AFTER_CHECK, AFTER_CHECK + "throw new Error('mutation: thrown after the check');\n", () => {
+    rmSync(TMP + 'out/preview.html', { force: true });
+    const r = runJob(goodJob);
+    expect(r.code === 2, `mutation (throw right after the check) → 2, not 1 (got ${r.code})`);
+    expect(/thrown after the check/.test(r.out) && NOT_JUDGED.test(r.out) && /No preview was written, and nothing was checked/.test(r.out),
+      'and the message carries the error, says it is not a judgement, and says no preview was written');
+    writeFileSync(TMP + 'out/preview.html', '<!-- from an earlier run -->');
+    const s2 = runJob(goodJob);
+    expect(s2.code === 2 && /is from an earlier run/.test(s2.out), 'with an old page at the path, it names that page as an earlier run\'s');
+    rmSync(TMP + 'out/preview.html', { force: true });
+
+    // The net is what makes this a 2. Without it Node's own 1 comes back.
+    mutate('scripts/preview.mjs', "process.on('uncaughtException', unexpected);\n", '', () =>
+      expect(runJob(goodJob).code === 1, 'mutation (no safety net) → the same throw exits 1, so the case above catches it'));
+  });
+  mutate('scripts/preview.mjs', AFTER_CHECK, AFTER_CHECK + "await Promise.reject(new Error('mutation: rejected after the check'));\n", () => {
+    const r = runJob(goodJob);
+    expect(r.code === 2 && /rejected after the check/.test(r.out) && NOT_JUDGED.test(r.out),
+      `mutation (a rejected await after the check) → 2 (got ${r.code})`);
+  });
+  // A rejection nobody awaits. Under Node's default it is rethrown and the
+  // uncaughtException hook would catch it anyway; the rejection hook is what
+  // holds when Node is told only to warn, where without it the run carries on
+  // and can exit 0 on a check that broke halfway.
+  {
+    const warnOnly = (jobPath) => {
+      try { execFileSync('node', ['--unhandled-rejections=warn', ROOT + 'scripts/preview.mjs', jobPath], { stdio: 'pipe' }); return 0; }
+      catch (e) { return e.status; }
+    };
+    mutate('scripts/preview.mjs', AFTER_CHECK, AFTER_CHECK + "Promise.reject(new Error('mutation: a rejection nobody awaits'));\n", () => {
+      expect(warnOnly(goodJob) === 2, 'mutation (a floating rejection, Node set to warn only) → 2');
+      mutate('scripts/preview.mjs', "process.on('unhandledRejection', unexpected);\n", '', () =>
+        expect(warnOnly(goodJob) === 0, 'mutation (no rejection hook) → the broken run exits 0, so the case above catches it'));
+    });
+  }
+  mutate('scripts/preview.mjs', "pageWritten = true;\n", "pageWritten = true;\nthrow new Error('mutation: thrown after the page');\n", () => {
+    const r = runJob(goodJob);
+    expect(r.code === 2 && /A preview was written to .* but the run did not finish; do not present it as checked/.test(r.out),
+      `mutation (throw after the page is written) → 2, and the message says the page exists but is not checked (got ${r.code})`);
+  });
+  mutate('scripts/preview.mjs', "if (job === null || typeof job !== 'object' || Array.isArray(job)) {", 'if (false) {', () => {
+    writeFileSync(TMP + 'shape.json', 'null');
+    const r = runJob(TMP + 'shape.json');
+    expect(r.code === 2 && !/must hold a JSON object/.test(r.out) && NOT_JUDGED.test(r.out),
+      'mutation (no shape check) → the net still gives 2, but the reason is a stack trace, which the shape case catches');
+  });
+  runJob(goodJob);
 }
 
 console.log('\ncode 1 — gate ran, judgement failed');

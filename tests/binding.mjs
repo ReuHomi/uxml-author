@@ -260,9 +260,12 @@ section('T — regenerating never touches your half');
   const src = readFileSync(ROOT + 'scripts/bind-csharp.mjs', 'utf8');
   const patched = T + 'greedy-bind.mjs';
   writeFileSync(patched, src
-    .replace('if (!logicExisted) writeFileSync(logicPath', 'writeFileSync(logicPath')
+    .replace('if (!logicExisted) write(logicPath', 'write(logicPath')
     .replace("from '../src/contract.js'", "from '" + pathToFileURL(ROOT + 'src/contract.js').href + "'")
     .replace("fileURLToPath(new URL('..', import.meta.url))", JSON.stringify(ROOT)));
+  // A mutation whose target has moved tests nothing and passes; that is how
+  // this one went quiet once already, when the write call was renamed.
+  expect(src.includes('if (!logicExisted) write(logicPath'), 'mutation target is present: the conditional logic write');
   writeFileSync(T + 't2.uxml', THREE);
   writeFileSync(T + 't2.json', JSON.stringify({
     uxml: 't2.uxml', className: 't2Controller', contract: 't2-contract.md' }));
@@ -363,6 +366,44 @@ section('O — an instance is a TemplateContainer, and its insides are not ours'
   expect(!/slot-label|slot-root/.test(a.cs),
     "and the template's own inner names stay out of this document's contract");
   expect(!/<Template>|templateRow/.test(a.cs), 'the declaration itself is not an element to bind');
+}
+
+section('V — an unexpected error is code 2, and says what it had written');
+{
+  const bindRun = (jobPath) => {
+    try { return { code: 0, out: execFileSync('node', [ROOT + 'scripts/bind-csharp.mjs', jobPath], { encoding: 'utf8', stdio: 'pipe' }) }; }
+    catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
+  };
+  for (const [text, what] of [['null', 'null'], ['7', 'a number'], ['[]', 'an array'], ['"bind"', 'a string']]) {
+    writeFileSync(T + 'shape.json', text);
+    const r = bindRun(T + 'shape.json');
+    expect(r.code === 2 && /must hold a JSON object/.test(r.out) && !/TypeError/.test(r.out),
+      `a bind job that is ${what} → 2, refused by name (got ${r.code})`);
+  }
+  const mutate = (from, to, fn) => {
+    const path = ROOT + 'scripts/bind-csharp.mjs', orig = readFileSync(path, 'utf8');
+    if (!orig.includes(from)) { expect(false, 'mutation target is present: ' + from); return; }
+    try { writeFileSync(path, orig.replace(from, to)); fn(); } finally { writeFileSync(path, orig); }
+  };
+  run('crash', { source: THREE });                     // a valid job to break
+  const BEFORE = "const contractPath = at(job.contract || 'ui-contract.md');\n";
+  mutate(BEFORE, "throw new Error('mutation: thrown before writing');\n" + BEFORE, () => {
+    const r = bindRun(T + 'crash.json');
+    expect(r.code === 2 && /thrown before writing/.test(r.out) && /not a finding/.test(r.out) && /Nothing was written/.test(r.out),
+      `mutation (throw before any write) → 2, "nothing was written" (got ${r.code})`);
+    mutate("process.on('uncaughtException', unexpected);\n", '', () =>
+      expect(bindRun(T + 'crash.json').code === 1, 'mutation (no safety net) → Node\'s own 1 returns, so the case above catches it'));
+  });
+  const MID = "const logicExisted = existsSync(logicPath);\n";
+  mutate(MID, MID + "throw new Error('mutation: thrown between writes');\n", () => {
+    const r = bindRun(T + 'crash.json');
+    expect(r.code === 2 && /Written before this.*crashController\.Bindings\.cs/.test(r.out) && !/Nothing was written/.test(r.out),
+      `mutation (throw after Bindings.cs is written) → 2, and it names the file it did write (got ${r.code})`);
+    mutate('function write(path, text) { writeFileSync(path, text); written.push(path); }',
+      'function write(path, text) { writeFileSync(path, text); }', () =>
+        expect(/Nothing was written/.test(bindRun(T + 'crash.json').out),
+          'mutation (writes not recorded) → it claims nothing was written, which the case above catches'));
+  });
 }
 
 console.log(failures ? `\nFAILED: ${failures}` : '\nall Step 3 conditions hold');

@@ -159,7 +159,9 @@ was measured against.
 
 Code 2 usually means `happy-dom` is missing (`npm install happy-dom`) or the
 panel size is absent. It also means the job asked for something that cannot be
-applied — a state or a budget it got wrong — and the message names which. No
+applied — a state or a budget it got wrong — and the message names which. And
+it is what a crash looks like: an unexpected error is reported as code 2 with
+the error itself, never as 1, because the run decided nothing. No
 preview is written on code 2. If a `preview.html` is already at the output path,
 it is from an earlier run and nothing checked it against the current files; the
 message says so. Say that out loud, and do not show the old file as if it were

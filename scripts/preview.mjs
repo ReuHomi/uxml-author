@@ -7,7 +7,8 @@
 //   0  gate ran, everything passed
 //   1  gate ran, something failed — collapse, overflow, unsupported, bad sheet
 //   2  GATE DID NOT RUN — no judgement was made about this output, or not under
-//      the conditions the job asked for (a state or budget that cannot be applied)
+//      the conditions the job asked for (a state or budget that cannot be applied),
+//      or the run broke on an unexpected error before deciding anything
 //   3  gate ran, no defect, but the preview is incomplete: an image was over the
 //      embed budget. The budget needs adjusting, not the document.
 //
@@ -32,22 +33,60 @@ const mb = (bytes) => (bytes / MB).toFixed(2) + ' MB';
 
 // Known once the job is read; null before that.
 let outPath = null;
+// Set the moment the page is on disk, so a failure after it says so.
+let pageWritten = false;
+// The happy-dom window, once there is one — the safety net closes it.
+let w = null;
 
 // Every refusal happens before the page is written, so a run that ends here
 // never produces a preview. The old closing line said the files "may still be
 // produced", which was never true and invited the worse mistake: a preview
 // left at the same path by an earlier run looks exactly like this run's output.
 // So the message says what is on disk, and whose it is.
+function onDisk() {
+  if (pageWritten) {
+    return `  A preview was written to ${outPath} before this, but the run did not finish; do not present it as checked.`;
+  }
+  if (outPath && existsSync(outPath)) {
+    return `  No preview was written by this run. The file already at ${outPath} is from an earlier run, and nothing has checked it against these files.`;
+  }
+  return '  No preview was written, and nothing was checked.';
+}
+
 function cannotRun(msg, hint) {
   console.error('CANNOT VERIFY — ' + msg);
   if (hint) console.error('  ' + hint);
-  if (outPath && existsSync(outPath)) {
-    console.error(`  No preview was written by this run. The file already at ${outPath} is from an earlier run, and nothing has checked it against these files.`);
-  } else {
-    console.error('  No preview was written, and nothing was checked.');
-  }
+  console.error(onDisk());
   process.exit(2);
 }
+
+// ── the safety net ──────────────────────────────────────────────────────────
+// Node ends a process that dies of an unexpected error with exit code 1, and 1
+// here means "checked, and found a problem in the document". A crash is the
+// opposite of that — nothing was decided — so it must leave as 2. Every
+// unexpected error reaches one of these two hooks; an ES module's top-level
+// throw and a rejected top-level await arrive as well (measured on Node 22).
+//
+// The happy-dom window is closed on the way out if there is one: leaving it
+// open across process teardown is the Windows crash hazard noted in
+// tests/conditions.mjs, and a native crash would replace this exit code with
+// whatever the OS reports. The close is bounded, so a close that hangs cannot
+// hold the process, and a second failure during it cannot re-enter.
+let dying = false;
+async function unexpected(e) {
+  if (dying) return;
+  dying = true;
+  process.exitCode = 2;
+  console.error('CANNOT VERIFY — the check stopped on an unexpected error: ' + ((e && e.stack) || String(e)));
+  console.error('  This is not a judgement of the UXML or USS. The run broke before reaching one, so nothing about them was decided.');
+  console.error(onDisk());
+  try {
+    if (w) await Promise.race([w.happyDOM.close(), new Promise((r) => setTimeout(r, 2000))]);
+  } catch { /* the exit code is already 2; a failed close must not change it */ }
+  process.exit(2);
+}
+process.on('uncaughtException', unexpected);
+process.on('unhandledRejection', unexpected);
 
 // ── job ─────────────────────────────────────────────────────────────────────
 const jobPath = process.argv[2];
@@ -56,8 +95,17 @@ let job;
 try { job = JSON.parse(readFileSync(jobPath, 'utf8')); }
 catch (e) { cannotRun('job file is not valid JSON: ' + e.message); }
 
+// A job that is not an object would otherwise reach `job.out` and die of a
+// TypeError. The safety net would turn that into a 2 as well, but a refusal
+// that says what is wrong with the file is worth more than a stack trace.
+if (job === null || typeof job !== 'object' || Array.isArray(job)) {
+  const got = job === null ? 'null' : Array.isArray(job) ? 'an array' : `a ${typeof job} (${JSON.stringify(job)})`;
+  cannotRun(`the job file must hold a JSON object such as { "uxml": "Screen.uxml", "panel": { … } }, but it holds ${got}`);
+}
+
 const base = dirname(resolve(jobPath));
 const at = (p) => resolve(base, p);
+if (job.out !== undefined && typeof job.out !== 'string') cannotRun('out must be a file path, got ' + JSON.stringify(job.out));
 outPath = at(job.out || 'preview.html');
 
 if (!job.panel || !job.panel.width || !job.panel.height) {
@@ -90,7 +138,7 @@ catch {
   cannotRun('happy-dom is not installed, so there is no DOM to render into',
     'Run `npm install happy-dom`. The preview page is written only after the check runs, so there is none from this run.');
 }
-const w = new Window({ url: 'http://localhost' });
+w = new Window({ url: 'http://localhost' });
 Object.assign(globalThis, {
   window: w, document: w.document, HTMLElement: w.HTMLElement,
   Node: w.Node, getComputedStyle: w.getComputedStyle.bind(w),
@@ -338,6 +386,7 @@ const page = readFileSync(ROOT + 'src/page.html', 'utf8')
   });
 }
 writeFileSync(outPath, page);
+pageWritten = true;
 L(`\npreview → ${outPath}  (${(page.length / 1024).toFixed(0)} KB)`);
 
 // See tests/conditions.mjs: leaving happy-dom open across process teardown is
