@@ -22,6 +22,16 @@ Read these first if anything acts on the exit code of `scripts/preview.mjs`.
   element, a name that is not a Unity state, and a value that is not an array.
   A job that asks for something the check cannot do was not checked, and now
   says so.
+- **An unexpected error exits 2, not 1.** Node ends a process that dies of an
+  unhandled error with 1, so a crash — including a job file holding `null` —
+  used to read as "checked, and found a problem". Both `preview.mjs` and
+  `bind-csharp.mjs` now catch it and exit 2, with the error and a line saying
+  it is not a judgement. A job file that is not a JSON object is refused by
+  name.
+- **A missing asset file exits 2, not 1.** A file named in `assets` that is
+  not on disk means the job points at nothing, like a missing UXML; it is no
+  longer counted as a problem with the screen. The run stops before rendering
+  and lists every missing file at once.
 - **Some screens that used to fail now pass, and the other way round.**
   - Elements hidden by `display: none` no longer exit 1 (see below).
   - Images between the old caps (512 KB per file, 2 MB in total) and the new
@@ -70,7 +80,8 @@ Read these first if anything acts on the exit code of `scripts/preview.mjs`.
 - The message for the total budget gives the numbers. It used to say the cap
   "was already reached", although a smaller image later in the list could
   still fit, and did.
-- An image file that is missing is unchanged: still a problem, still exit 1.
+- An image file that is missing stops the run (exit 2) and is listed with
+  every other missing file; see the breaking changes above.
 
 ### The preview page and the report agree
 
@@ -81,6 +92,8 @@ Read these first if anything acts on the exit code of `scripts/preview.mjs`.
   that read *Pass* may read *Attention*.
 - An incomplete preview (exit 3) gets its own verdict on the page,
   *Incomplete preview*, neither pass nor problem.
+- The page's *Images left out of the embed* list is gone: a missing file now
+  stops the run, and an image over the budget has its own list.
 
 ### Smaller fixes
 
@@ -88,4 +101,8 @@ Read these first if anything acts on the exit code of `scripts/preview.mjs`.
   No refusal writes the page. The message now says that no preview was
   written, or, when a `preview.html` is already at the output path, that it is
   from an earlier run and was not checked.
+- When a run stops on an unexpected error, it says what is on disk: no
+  preview, an earlier run's page, or a page this run wrote before failing.
+  `bind-csharp.mjs` names the files it had already written instead of always
+  saying "Nothing was written".
 - `SKILL.md` gives the bundle's real size and no longer calls it minified.
