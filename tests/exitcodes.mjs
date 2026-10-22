@@ -299,36 +299,51 @@ console.log('\nthe theme: the job asks, the core draws, and the report says whic
   expect(edit.code === 0 && /^theme editor   panel 400x300/.test(first(edit)), 'theme: "editor" → the first line says editor: ' + first(edit));
   const run = runJob(job('theme-runtime', { ...base, theme: 'runtime' }));
   expect(run.code === 0 && /^theme runtime   panel/.test(first(run)), 'theme: "runtime" asked outright is the default');
-  const bad = runJob(job('theme-bad', { ...base, theme: 'dark' }));
-  expect(bad.code === 1 && /^theme runtime   panel/.test(first(bad)),
-    'an unknown theme → 1, and the first line says what was drawn (runtime), not what was asked: ' + first(bad));
-  expect(/malformed: Unknown theme 'dark' in the theme option; drew the default theme 'runtime'/.test(bad.out),
-    'and the core\'s warning is in the report in its own words');
-  expect(runJob(job('theme-null', { ...base, theme: null })).code === 1, 'null is not "no theme": it is a value the core refuses → 1');
   expect(dflt.out.split('\n')[1] === 'states: none applied (the default)', 'the states line is still the second line');
 
-  const pd = pageOf('theme-default'), pe = pageOf('theme-editor'), pb = pageOf('theme-bad');
-  expect(pd.theme === 'theme runtime' && pe.theme === 'theme editor' && pb.theme === 'theme runtime',
-    `the page names the same theme as the report: ${pd.theme} / ${pe.theme} / ${pb.theme}`);
-  expect(/^Pass/.test(pe.verdict) && /^Attention/.test(pb.verdict), 'and reaches the same verdict on each');
+  // A theme the core would not draw is a job that cannot be run as written, like a state that
+  // matches nothing: the screen drawn would not be the one asked about. Code 2, no page.
+  for (const [theme, what] of [['dark', 'an unknown name'], [null, 'null'], ['', 'an empty name'], [5, 'a number']]) {
+    const n = 'theme-bad-' + String(theme === null ? 'null' : theme === '' ? 'empty' : theme);
+    const r = runJob(job(n, { ...base, theme }));
+    expect(r.code === 2 && /the requested theme cannot be used/.test(r.out) && /No preview was written/.test(r.out) && !existsSync(TMP + '../out/' + n + '.html'),
+      `${what} as the theme → 2, named, and no preview written (got ${r.code})`);
+  }
+  expect(/"dark"/.test(runJob(job('theme-bad-dark', { ...base, theme: 'dark' })).out) &&
+    /would draw "runtime"/.test(runJob(job('theme-bad-dark', { ...base, theme: 'dark' })).out),
+    'and the message says which theme was asked and which the core would have drawn');
+  mkdirSync(TMP + '../out', { recursive: true });
+  writeFileSync(TMP + '../out/theme-stale.html', '<!-- from an earlier run -->');
+  const staleJob = TMP + 'theme-stale.json';
+  writeFileSync(staleJob, JSON.stringify({ ...base, theme: 'dark', out: '../out/theme-stale.html' }));
+  const stale = runJob(staleJob);
+  expect(stale.code === 2 && /The file already at .*theme-stale\.html is from an earlier run/.test(stale.out) &&
+    readFileSync(TMP + '../out/theme-stale.html', 'utf8') === '<!-- from an earlier run -->',
+    'with an old page at the output path, the refusal calls it an earlier run\'s and leaves it alone');
+
+  const pd = pageOf('theme-default'), pe = pageOf('theme-editor');
+  expect(pd.theme === 'theme runtime' && pe.theme === 'theme editor',
+    `the page names the same theme as the report: ${pd.theme} / ${pe.theme}`);
+  expect(/^Pass/.test(pd.verdict) && /^Pass/.test(pe.verdict), 'and reaches the same verdict on each');
 
   // The backdrop follows the theme that was drawn. Runtime text is dark and editor text is light,
   // and the core paints nothing behind the panel, so a backdrop chosen by the page's own light/dark
   // chrome would make one of the two unreadable (core handoff section 2: dark text on a dark page
-  // "almost cannot be seen").
-  expect(pd.backdrop === 'runtime' && pe.backdrop === 'editor' && pb.backdrop === 'runtime',
-    `the stage carries the drawn theme for its backdrop: ${pd.backdrop} / ${pe.backdrop} / ${pb.backdrop}`);
+  // "almost cannot be seen"). The runtime checkerboard is the core playground's own: white and
+  // #cccccc (playground/index.html, `#panel[data-theme="runtime"]`), so one meaning has one look.
+  expect(pd.backdrop === 'runtime' && pe.backdrop === 'editor', `the stage carries the drawn theme for its backdrop: ${pd.backdrop} / ${pe.backdrop}`);
   {
     const html = readFileSync(TMP + '../out/theme-default.html', 'utf8');
-    const rule = (t) => new RegExp('#viewport\\[data-drawn="' + t + '"\\]\\s*\\{[^}]*repeating-conic-gradient').test(html);
-    expect(rule('runtime') && rule('editor'), 'and the page has a checkerboard rule for each theme');
-    const light = (html.match(/#viewport\[data-drawn="runtime"\]\s*\{[^}]*\}/) || [''])[0], dark = (html.match(/#viewport\[data-drawn="editor"\]\s*\{[^}]*\}/) || [''])[0];
-    expect(light !== '' && dark !== '' && !/var\(--/.test(light) && !/var\(--/.test(dark),
+    const rule = (t) => (html.match(new RegExp('#viewport\\[data-drawn="' + t + '"\\]\\s*\\{[^}]*\\}')) || [''])[0];
+    const light = rule('runtime'), dark = rule('editor');
+    expect(/#ffffff/i.test(light) && /#cccccc/i.test(light) && /gradient/.test(light), 'the runtime checkerboard is white and #cccccc, as in the core\'s playground');
+    expect(/gradient/.test(dark) && !/#ffffff|#cccccc/i.test(dark), 'the editor one is dark and has a checkerboard of its own');
+    expect(!/var\(--/.test(light) && !/var\(--/.test(dark),
       'neither rule uses the page chrome\'s variables, so the chrome\'s dark mode cannot move the backdrop');
   }
   mutate('src/page.html', 'viewport.setAttribute(\'data-drawn\', res.theme);', 'viewport.setAttribute(\'data-drawn\', String(UXML_INPUT.theme));', () => {
-    runJob(TMP + 'theme-bad.json');
-    expect(pageOf('theme-bad').backdrop === 'dark', 'mutation (the backdrop follows what was asked) → an unknown theme gets a "dark" backdrop');
+    runJob(TMP + 'theme-default.json');
+    expect(pageOf('theme-default').backdrop === 'undefined', 'mutation (the backdrop follows what was asked) → a job with no theme gets no backdrop of its own');
   });
   mutate('src/page.html', 'viewport.setAttribute(\'data-drawn\', res.theme);', '', () => {
     runJob(TMP + 'theme-editor.json');
@@ -336,20 +351,33 @@ console.log('\nthe theme: the job asks, the core draws, and the report says whic
   });
   mutate('src/page.html', '#viewport[data-drawn="runtime"]', '#viewport[data-drawn="runtime-off"]', () => {
     runJob(TMP + 'theme-default.json');
-    expect(!/#viewport\[data-drawn="runtime"\]/.test(readFileSync(TMP + '../out/theme-default.html', 'utf8')), 'mutation (the runtime rule renamed away) → the page has no runtime checkerboard');
+    expect(rule0() === '', 'mutation (the runtime rule renamed away) → the page has no runtime checkerboard');
+    function rule0() { return (readFileSync(TMP + '../out/theme-default.html', 'utf8').match(/#viewport\[data-drawn="runtime"\]\s*\{[^}]*\}/) || [''])[0]; }
   });
-  runJob(TMP + 'theme-default.json'); runJob(TMP + 'theme-editor.json'); runJob(TMP + 'theme-bad.json');   // the unmutated pages back
+  mutate('src/page.html', '#ffffff 25%', '#f2f2f0 25%', () => {
+    runJob(TMP + 'theme-default.json');
+    expect(!/#ffffff/i.test((readFileSync(TMP + '../out/theme-default.html', 'utf8').match(/#viewport\[data-drawn="runtime"\]\s*\{[^}]*\}/) || [''])[0]),
+      'mutation (another white) → the check against the playground\'s colours fails');
+  });
+  runJob(TMP + 'theme-default.json'); runJob(TMP + 'theme-editor.json');   // the unmutated pages back
 
   // mutations
   mutate('scripts/preview.mjs', 'theme: job.theme', 'theme: undefined', () =>
     expect(!/^theme editor/.test(first(runJob(TMP + 'theme-editor.json'))), 'mutation (the job\'s theme never reaches the check) → an editor job reports runtime'));
-  mutate('scripts/preview.mjs', 'L(`${check.describeTheme(res)}   panel', "L(`theme ${job.theme || 'runtime'}   panel", () =>
-    expect(/^theme dark/.test(first(runJob(TMP + 'theme-bad.json'))), 'mutation (print what was asked) → an unknown theme is reported as "dark"'));
-  mutate('src/page.html', 'globalThis.UxmlCheck.describeTheme(res)', "'theme ' + (UXML_INPUT.theme || 'runtime')", () => {
-    runJob(TMP + 'theme-bad.json');
-    expect(pageOf('theme-bad').theme === 'theme dark', 'mutation (the page prints what was asked) → an unknown theme is shown as "dark"');
+  mutate('scripts/preview.mjs', 'L(`${check.describeTheme(res)}   panel', 'L(`theme ${job.theme}   panel', () =>
+    expect(/^theme undefined/.test(first(runJob(TMP + 'theme-default.json'))), 'mutation (print what was asked) → a job with no theme is reported as "theme undefined"'));
+  mutate('src/page.html', 'globalThis.UxmlCheck.describeTheme(res)', "'theme ' + UXML_INPUT.theme", () => {
+    runJob(TMP + 'theme-default.json');
+    expect(pageOf('theme-default').theme === 'theme undefined', 'mutation (the page prints what was asked) → a job with no theme is shown as "theme undefined"');
   });
-  runJob(TMP + 'theme-bad.json');              // put the unmutated page back before anything reads it
+  runJob(TMP + 'theme-default.json');
+  mutate('scripts/preview.mjs', 'check.checkTheme(', 'check.checkThemeOff(', () => {
+    // the gate's own refusal still stops the run, but it is not the named one
+    const r = runJob(TMP + 'theme-bad-dark.json');
+    expect(!/the requested theme cannot be used/.test(r.out), 'mutation (the job-level refusal skipped) → the message is no longer the named one');
+  });
+  mutate('src/check.js', 'r.theme !== theme', "theme !== 'runtime'", () =>
+    expect(runJob(TMP + 'theme-editor.json').code === 2, 'mutation (a list of one theme kept in check.js) → an editor job is refused'));
 }
 
 console.log('\nG — the cap is never silent');

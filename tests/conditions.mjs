@@ -425,16 +425,35 @@ const layout = (res) => JSON.stringify(res.boxes.map((b) => [b.name, b.box]));
 }
 const refusal = (C, extra) => C.checkStates(core, useInput(extra)).errors.join(' | ');
 {
-  // The allow-list is the core's, not a copy kept here. A copy is a second
-  // place to forget when Unity adds a state.
+  // A `states` key is judged by the core: since 0.6.0 it says so as data (`subject.problem`), and
+  // a list of states kept here is a second place to forget when Unity adds one (core CHANGELOG
+  // 0.6.0, "For consumers": "uxml-author master assumes the 0.5.1 meaning"). Only `activeStates`
+  // still needs a list, because the core is silent about an unknown name there — and that list
+  // is the core's own USS_STATES.
   expect(!/\[\s*'hover',\s*'active'/.test(CHECK_SRC), 'check.js holds no copy of the state list');
-  const more = { ...core, USS_STATES: [...core.USS_STATES, 'future-state'] };
-  expect(loadCheck().checkStates(more, useInput({ states: { '#Use': ['future-state'] } })).errors.length === 0,
-    'a state the core adds is accepted without touching check.js');
-  const Pinned = loadCheck((x) => x.replace('var allowed = Array.prototype.slice.call(core.USS_STATES);',
-    "var allowed = ['hover', 'active', 'inactive', 'focus', 'disabled', 'enabled', 'checked'];"));
-  expect(Pinned.checkStates(more, useInput({ states: { '#Use': ['future-state'] } })).errors.length > 0,
+  const quiet = { ...core, USS_STATES: [...core.USS_STATES, 'future-state'], resolveStyles: (d, o) => ({ ...core.resolveStyles(d, o), warnings: [] }) };
+  expect(loadCheck().checkStates(quiet, useInput({ states: { '#Use': ['future-state'] } })).errors.length === 0,
+    'a state in a states value is the core\'s to judge: when it says nothing, it is accepted without touching check.js');
+  expect(loadCheck().checkStates(quiet, useInput({ activeStates: ['future-state'] })).errors.length === 0 &&
+    loadCheck().checkStates(core, useInput({ activeStates: ['future-state'] })).errors.length > 0,
+    'activeStates names are checked against the core\'s USS_STATES, the one place the core says nothing');
+  const Pinned = loadCheck((x) => x.replace('errors, allowed, false)', "errors, ['hover', 'active', 'inactive', 'focus', 'disabled', 'enabled', 'checked'], true)"));
+  expect(Pinned.checkStates(quiet, useInput({ states: { '#Use': ['future-state'] } })).errors.length > 0,
     'mutation (a pinned copy again) → the new state is refused, so the case above catches it');
+  // What the core says about a key, and what the skill says back.
+  const says = (w) => ({ ...core, resolveStyles: (d, o) => ({ ...core.resolveStyles(d, o), warnings: [w] }) });
+  const key = (problem, extra = {}) => ({ kind: 'unsupported-selector', reason: 'invalid-value', message: 'core words',
+    subject: Object.assign({ kind: 'states-key', key: '#Use' }, problem === undefined ? {} : { problem }, extra) });
+  const said = (w) => loadCheck().checkStates(says(w), useInput({ states: { '#Use': ['hover'] } })).errors.join(' | ');
+  expect(/"#Use" matches no element/.test(said(key('matches-nothing'))), 'problem matches-nothing → "matches no element"');
+  expect(/matches no element.*state pseudo-class in the key itself never matches/.test(said(key('state-in-key'))), 'problem state-in-key → says the state belongs in states, not in the key');
+  expect(/"#Use" is not a usable USS selector/.test(said(key(undefined))), 'no problem at all → "not a usable USS selector"');
+  expect(/names "hovr", which is not a Unity state/.test(said(key('unknown-state', { state: 'hovr' }))), 'problem unknown-state → names the state');
+  expect(/"#Use".*brand-new.*core words/.test(said(key('brand-new'))),
+    'a problem this version does not know is refused too, with the core\'s own words: ' + said(key('brand-new')));
+  expect(loadCheck().checkStates(says({ ...key('matches-nothing'), subject: { kind: 'selector', selector: '#x' } }), useInput({ states: { '#Use': ['hover'] } })).errors.length === 0 &&
+    loadCheck().checkStates(says(key('matches-nothing', { key: '#Other' })), useInput({ states: { '#Use': ['hover'] } })).errors.length === 0,
+    'a warning about the document\'s own selector, or about a key the job did not give, is not the job\'s refusal');
 }
 {
   const C = loadCheck();
@@ -478,22 +497,31 @@ const refusal = (C, extra) => C.checkStates(core, useInput(extra)).errors.join('
     'mutation (no array check) → the string is split into letters and the refusal no longer says why: ' + e);
 }
 {
-  const C = loadCheck((x) => x.replace("typeof n !== 'string' || allowed.indexOf(n) === -1", "typeof n !== 'string'"));
-  expect(refusal(C, { states: { '#Use': ['hovr'] } }) === '', 'mutation (no allow-list) → a mistyped state is accepted');
+  const M = (from, to) => loadCheck((x) => { if (!x.includes(from)) throw new Error('mutation target missing: ' + from); return x.replace(from, to); });
+  const tryM = (from, to) => { try { return M(from, to); } catch (e) { expect(false, e.message); return null; } };
+  const unread = tryM("errors.push(describeStatesKey(w, states));", ";");
+  expect(unread && refusal(unread, { states: { '#Use': ['hovr'] } }) === '',
+    'mutation (the core\'s states-key warnings not read) → a mistyped state is accepted');
+  expect(unread && refusal(unread, { states: { '#Nope': ['hover'] } }) === '',
+    'and so is a key matching nothing');
+  const onlyUnknown = tryM("errors.push(describeStatesKey(w, states));", "if (w.subject.problem !== 'matches-nothing') errors.push(describeStatesKey(w, states));");
+  expect(onlyUnknown && refusal(onlyUnknown, { states: { '#Nope': ['hover'] } }) === '' && refusal(onlyUnknown, { states: { '#Use': ['hovr'] } }) !== '',
+    'mutation (matches-nothing not read) → only a key matching nothing slips through');
+  const noKeyCheck = tryM("!Object.prototype.hasOwnProperty.call(states, subj.key)", "false");
+  expect(noKeyCheck && noKeyCheck.checkStates({ ...core, resolveStyles: (d, o) => ({ ...core.resolveStyles(d, o), warnings: [{ kind: 'unsupported-selector', message: 'm', subject: { kind: 'states-key', key: '#Other', problem: 'matches-nothing' } }] }) },
+    useInput({ states: { '#Use': ['hover'] } })).errors.length > 0,
+    'mutation (any key the core names counts) → a key the job did not give is refused');
 }
 {
-  const C = loadCheck((x) => x.replace("        else if (!hit.has(PROBE_PROP + i)) {", "        else if (false) {"));
-  expect(refusal(C, { states: { '#Nope': ['hover'] } }) === '', 'mutation (no match check) → a key matching nothing is accepted');
-}
-{
-  const READ = "if (subj && subj.kind === 'states-key' && Object.prototype.hasOwnProperty.call(states, subj.key)) refused.add(subj.key);";
-  const C = loadCheck((x) => x.replace(READ, ''));
-  const e = refusal(C, { states: { '#Use[x]': ['hover'] } });
-  expect(!/not a usable USS selector/.test(e), 'mutation (core refusal not read) → the unusable key is misdescribed: ' + e);
+  const C = loadCheck((x) => x.replace("if (st.errors.length) throw new Error(", "if (false) throw new Error("));
+  const res = C.run(core, stage(), useInput({ states: { '#Use[x]': ['hover'] } }));
+  expect(res.other.some((w) => w.subject && w.subject.kind === 'states-key' && w.subject.key === '#Use[x]'),
+    "mutation (run() does not refuse) → the job's bad key lands among the document's own warnings");
+  res.dispose();
 }
 {
   // The refusal reads the core's `subject`, not its message. A core that
-  // rewords every warning — which 0.5.1 says it may do in any release — must
+  // rewords every warning — which the core says it may do in any release — must
   // still have its refusal of a states key noticed.
   const reworded = {
     ...core,                                // the core's exports are getters; copy their values
@@ -504,31 +532,14 @@ const refusal = (C, extra) => C.checkStates(core, useInput(extra)).errors.join('
   };
   const e = loadCheck().checkStates(reworded, useInput({ states: { '#Use[x]': ['hover'] } })).errors.join(' | ');
   expect(/"#Use\[x\]" is not a usable USS selector/.test(e), 'with every core message reworded, the unusable key is still refused by its subject');
-  // mutation: go back to matching the wording
-  const ByText = loadCheck((x) => x.replace(
-    "if (subj && subj.kind === 'states-key' && Object.prototype.hasOwnProperty.call(states, subj.key)) refused.add(subj.key);",
-    "keys.forEach(function (k) { if (w.message.indexOf('states key \"' + k + '\"') === 0) refused.add(k); });"));
+  const e3 = loadCheck().checkStates(reworded, useInput({ states: { '#Nope': ['hover'] } })).errors.join(' | ');
+  expect(/"#Nope" matches no element/.test(e3), 'and a key matching nothing is still described by its problem, not by the core\'s wording');
+  const ByText = loadCheck((x) => x.replace("errors.push(describeStatesKey(w, states));", "errors.push(w.message.indexOf('states key') === 0 ? 'refused' : '');"));
   const e2 = ByText.checkStates(reworded, useInput({ states: { '#Use[x]': ['hover'] } })).errors.join(' | ');
   expect(!/not a usable USS selector/.test(e2), 'mutation (match the message text again) → the reworded core slips past, so the case above catches it');
 }
-{
-  const C = loadCheck((x) => x.replace("if (st.errors.length) throw new Error(", "if (false) throw new Error("));
-  const res = C.run(core, stage(), useInput({ states: { '#Use[x]': ['hover'] } }));
-  expect(res.other.some((w) => w.subject && w.subject.kind === 'states-key' && w.subject.key === '#Use[x]'),
-    "mutation (run() does not refuse) → the job's bad key lands among the document's own warnings");
-  res.dispose();
-}
-{
-  const C = loadCheck((x) => x.replace("        var extra = {}; extra[PROBE_SHEET] = probe;",
-    "        var extra = {}; extra[PROBE_SHEET] = probe; input.sheets[PROBE_SHEET] = probe; input.uxml = String(input.uxml).replace(ROOT_OPEN, function (m) { return m + '<Style src=\"' + PROBE_SHEET + '\" />'; });"));
-  const inp = useInput({ states: { '#Panel': ['focus'] } });
-  inp.sheets = { ...USE_SHEETS };
-  const res = C.run(core, stage(), inp);
-  expect(res.depsRequested.some((d) => /probe/.test(d)), 'mutation (probe leaks into the real parse) → the isolation case catches it');
-  res.dispose();
-}
 
-section('K — the probe passes a states key exactly when the renderer applies it');
+section('K — a states key is accepted exactly when the renderer applies it');
 // Measured, not assumed. The core matches a states key with no state at all
 // in scope — neither activeStates nor the `disabled` an `enabled="false"`
 // attribute gives — so a key that itself needs a state never selects anything
@@ -596,19 +607,23 @@ function probeTable(C) {
     'a plain miss does not get that explanation');
 }
 {
-  // mutation: the probe applies the job's activeStates, as it did before
-  const C = loadCheck((x) => x.replace('core.resolveStyles(probeDoc, { activeStates: new Set(), states: {} })',
-    'core.resolveStyles(probeDoc, { activeStates: activeSet, states: {} })'));
-  const bad = probeTable(C).filter((r) => r.passed !== r.applied).map((r) => r.key + '+' + r.active.join(','));
-  expect(bad.includes('#Use:hover+hover') && bad.includes('#Free:disabled+disabled'),
-    'mutation (probe sees activeStates) → it passes keys the renderer ignores: ' + bad.join(' '));
-}
-{
-  // mutation: the `enabled` attribute is left on the probe copy
-  const C = loadCheck((x) => x.replace('        stripEnabled(probeDoc.root);\n', ''));
-  const bad = probeTable(C).filter((r) => r.passed !== r.applied).map((r) => r.key + '+' + r.active.join(','));
-  expect(bad.includes('#Use:disabled+') && bad.includes('#Child:disabled+') && bad.includes('#Parent:disabled #Child+'),
-    'mutation (probe keeps enabled="false") → it passes keys aimed at disabled elements: ' + bad.join(' '));
+  // The core's verdict (subject.problem) against what the renderer does, row by row. These
+  // replace the two mutations of the probe this suite used to carry ("probe sees activeStates",
+  // "probe keeps enabled=false"): the core matches a key with no state in scope on its own, and
+  // the rows below are the same situations — the job's activeStates, and an enabled="false"
+  // element — put to the core directly.
+  const M = (from, to) => { try { return loadCheck((x) => { if (!x.includes(from)) throw new Error('mutation target missing: ' + from); return x.replace(from, to); }); }
+                            catch (e) { expect(false, e.message); return null; } };
+  const wrong = (C) => C ? probeTable(C).filter((r) => r.passed !== r.applied).map((r) => r.key + '+' + r.active.join(',')) : [];
+  const noStateInKey = M("errors.push(describeStatesKey(w, states));", "if (w.subject.problem !== 'state-in-key') errors.push(describeStatesKey(w, states));");
+  const bad1 = wrong(noStateInKey);
+  expect(bad1.includes('#Use:hover+hover') && bad1.includes('#Free:disabled+disabled') && bad1.includes('#Use:disabled+') && bad1.includes('#Child:disabled+'),
+    'mutation (state-in-key not read) → keys carrying a state pass though the renderer ignores them, with or without activeStates and on an enabled="false" element: ' + bad1.join(' '));
+  const noCascadeStates = M("{ activeStates: activeSet, states: states }", "{ activeStates: new Set(), states: {} }");
+  const bad2 = wrong(noCascadeStates);
+  expect(bad2.length > 0, 'mutation (the core is not given the states) → it has nothing to judge and every key passes: ' + bad2.join(' '));
+  const onlyActive = M("errors.push(describeStatesKey(w, states));", "if (w.subject.problem === undefined) errors.push(describeStatesKey(w, states));");
+  expect(wrong(onlyActive).length > 0, 'mutation (only a problem-less refusal is read) → the keys the renderer ignores pass');
 }
 
 section('L — warnings are sorted by what the core says they are about');
@@ -763,23 +778,34 @@ section('L — warnings are sorted by what the core says they are about');
   expect(!NoBasis.judge(rb, {}).problems.some((p) => /this preview's layout/.test(p)), 'mutation (no preview-basis label) → the caveat case catches it');
 }
 
-section('M — the theme is passed to the core, and what was drawn is what is reported');
+section('M — the theme is passed to the core; one the core would not draw is refused, not drawn');
 {
+  // A theme the core does not know is drawn as the default, with a `malformed` warning that has
+  // no `subject` and so cannot be told from the other `malformed` warnings by its fields. What
+  // IS structural is the result: RenderResult.theme differs from what was asked. A screen drawn
+  // in a theme the job did not ask for is not the screen asked about, which is what a refused
+  // `states` entry or a bad budget already mean here: the run does not happen (code 2).
   const C = loadCheck();
   const LABEL = '<ui:UXML xmlns:ui="UnityEngine.UIElements"><ui:Label name="P" text="hi" /></ui:UXML>';
   const go = (Chk, extra) => { const r = Chk.run(core, stage(), { uxml: LABEL, panel: PANEL, ...extra }); r.dispose(); return r; };
+  const refused = (Chk, theme) => { try { go(Chk, { theme }); return ''; } catch (e) { return e.message; } };
   const height = (r) => r.boxes.find((b) => b.name === 'P').box.height;
-  const isBad = (r) => r.other.some((w) => w.kind === 'malformed' && w.reason === 'invalid-value' && /Unknown theme 'dark'/.test(w.message));
-  const def = go(C, {}), rt = go(C, { theme: 'runtime' }), ed = go(C, { theme: 'editor' }), bad = go(C, { theme: 'dark' });
+  const def = go(C, {}), rt = go(C, { theme: 'runtime' }), ed = go(C, { theme: 'editor' });
   expect(def.theme === 'runtime' && rt.theme === 'runtime' && height(def) === height(rt) && !def.other.length,
     'no theme asked → the core\'s default, runtime, is drawn and reported, with no warning');
   expect(ed.theme === 'editor' && height(ed) !== height(def) && !ed.other.length,
     `theme: "editor" reaches the renderer and is reported: Label ${height(ed)}px against ${height(def)}px`);
-  expect(bad.theme === 'runtime' && height(bad) === height(def),
-    'an unknown theme draws the default, and the result says runtime — what was drawn, not what was asked');
-  expect(isBad(bad) && C.judge(bad, {}).code === 1 && C.judge(bad, {}).problems.some((p) => /Unknown theme 'dark'/.test(p)),
-    'and the core\'s warning lands in "other": code 1, named in the problems');
-  expect(go(C, { theme: null }).other.length === 1, 'null is a value, not "unset": the core judges it too');
+  expect(/theme refused/.test(refused(C, 'dark')) && /"dark"/.test(refused(C, 'dark')) && /"runtime"/.test(refused(C, 'dark')),
+    'an unknown theme is refused by name, and the message says what the core would have drawn: ' + refused(C, 'dark'));
+  expect(/theme refused/.test(refused(C, null)) && /theme refused/.test(refused(C, 5)) && /theme refused/.test(refused(C, '')),
+    'null, a number and an empty string are values too, and refused');
+  const ct = (Chk, t) => typeof Chk.checkTheme === 'function' ? Chk.checkTheme(core, t, stage()) : { errors: ['checkTheme does not exist'] };
+  expect(typeof C.checkTheme === 'function' && ct(C, 'editor').errors.length === 0 && ct(C, undefined).errors.length === 0 &&
+    ct(C, 'dark').errors.length === 1, 'checkTheme says the same without drawing a screen');
+  expect(core.liveNodeCount() === 0, 'and neither the refusal nor the check leaves a Yoga node behind');
+  const future = { ...core, render: (d, c, o) => ({ ...core.render(d, c, { ...o, theme: undefined }), theme: o.theme }) };
+  expect(typeof C.checkTheme === 'function' && C.checkTheme(future, 'highcontrast', stage()).errors.length === 0,
+    'a theme the core one day draws is accepted without touching check.js: nothing here lists the names');
 
   // Each mutation breaks one hand-off between the job and the core.
   const T = (from, to) => { try { return loadCheck((x) => { if (!x.includes(from)) throw new Error('mutation target missing: ' + from); return x.replace(from, to); }); }
@@ -787,12 +813,12 @@ section('M — the theme is passed to the core, and what was drawn is what is re
   const pass = T('theme: input.theme,', '');
   expect(pass && go(pass, { theme: 'editor' }).theme === 'runtime',
     'mutation (the theme never reaches the core) → "editor" is drawn as runtime, so the case above catches it');
-  const echo = T('theme: r.theme,', "theme: input.theme || 'runtime',");
-  expect(echo && go(echo, { theme: 'dark' }).theme === 'dark',
-    'mutation (report what was asked, not what was drawn) → the unknown theme is reported as "dark"');
-  const swallow = T('theme: input.theme,', "theme: input.theme === 'editor' ? 'editor' : undefined,");
-  expect(swallow && !isBad(go(swallow, { theme: 'dark' })),
-    'mutation (an unknown theme quietly replaced before the core sees it) → the warning is lost and the run passes');
+  const skip = T("var th = checkTheme(core, input.theme, container.ownerDocument.createElement('div'));", "var th = { errors: [] };");
+  expect(skip && refused(skip, 'dark') === '',
+    'mutation (the refusal skipped) → "dark" is drawn as runtime with the core\'s warning among the others, and the run passes or fails for the wrong reason');
+  const pinned = T("r.theme !== theme", "theme !== 'runtime'");
+  expect(pinned && refused(pinned, 'editor') !== '',
+    'mutation (a list of one theme kept here) → "editor" is refused');
   const dropped = T('theme: r.theme,', '');
   expect(dropped && go(dropped, {}).theme === undefined,
     'mutation (the result carries no theme) → the report has nothing to print');

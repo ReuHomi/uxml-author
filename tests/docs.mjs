@@ -3,7 +3,7 @@
 // nothing breaks, the model just starts following instructions that are no
 // longer true. These run the real thing and compare.
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, existsSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -115,10 +115,16 @@ section('the theme the document describes is the theme the scripts take');
     const r = themed(name);
     expect(r.code === 0 && r.out.split('\n')[0].startsWith('theme ' + name + '   '), `theme "${name}" runs clean and the report's first line names it: ${r.out.split('\n')[0]}`);
   }
+  // An unknown name is a job that cannot be run as written (code 2, nothing written), like a state that
+  // matches nothing — not a finding about the document.
+  rmSync(T + 'theme.html', { force: true });
   const unknown = themed('dark');
-  expect(unknown.code === 1 && unknown.out.split('\n')[0].startsWith('theme runtime   ') && /Unknown theme 'dark'/.test(unknown.out),
-    'an unknown name exits 1, the default is drawn, and the first line says so — as SKILL.md says');
-  expect(/A\s+name\s+the\s+core\s+does\s+not\s+know[^.]*exit\s+1[^.]*runtime\s+theme\s+is\s+drawn/.test(SKILL), 'SKILL.md says that about an unknown name');
+  expect(unknown.code === 2 && !existsSync(T + 'theme.html'), 'an unknown name stops the run with code 2 and writes no preview, as SKILL.md says');
+  const SAYS_REFUSED = (t) => /A\s+name\s+other\s+than\s+`runtime`\s+or\s+`editor`[^.]*code\s+2[^.]*no\s+preview/.test(t);
+  expect(SAYS_REFUSED(SKILL), 'SKILL.md says that about an unknown name: code 2, no preview');
+  expect(!SAYS_REFUSED(SKILL.replace(/code\s+2/g, 'code 1')) && !SAYS_REFUSED(SKILL.replace(/no\s+preview/g, 'a preview')) &&
+    !SAYS_REFUSED(SKILL.replace(/other\s+than\s+`runtime`\s+or\s+`editor`/, 'the core does not know')),
+    'mutations (code 1, a preview, the names dropped) → the claim check fails');
 }
 
 section('the exit codes are what the table says');
