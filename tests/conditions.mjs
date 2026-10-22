@@ -826,25 +826,25 @@ section('N — what SKILL.md says the core draws, run against the core');
   const everywhere = paint('<ui:Button name="B" text="a" />', { activeStates: ['disabled'] });
   const dims = (p) => styleOf(p, 'B').opacity;
   const disabledHolds = (w, f, e) => w === '0.5' && !f && !e;
-  const SAY_FORCED = /forced[^.]*`disabled`[^.]*is not dimmed/, SAY_FILE = /Only `enabled="false"` written in the UXML dims/;
+  const SAY_FORCED = /forced[^.]*`disabled`[^.]*is\s+not\s+dimmed/, SAY_FILE = /Only\s+`enabled="false"`\s+written\s+in\s+the\s+UXML\s+dims/;
   claim('enabled="false" dims; a disabled forced through states or activeStates does not',
     { holds: disabledHolds(dims(written), dims(forced), dims(everywhere)),
       seen: `${dims(written)} / ${dims(forced) || 'not dimmed'} / ${dims(everywhere) || 'not dimmed'}` },
     { test: (t) => SAY_FORCED.test(t) && SAY_FILE.test(t) },
     [['forced disabled dims', () => disabledHolds('0.5', '0.5', '')], ['enabled="false" does not dim', () => disabledHolds('', '', '')],
      ['activeStates dims', () => disabledHolds('0.5', '', '0.5')]],
-    [['"is not dimmed" removed', (t) => t.replace(/is not dimmed/g, 'is dimmed')], ['the file-only sentence removed', (t) => t.replace(SAY_FILE, '')],
-     ['both halves removed', (t) => t.replace(/is not dimmed/g, 'is dimmed').replace(SAY_FILE, '')]]);
+    [['"is not dimmed" removed', (t) => t.replace(/is\s+not\s+dimmed/g, 'is dimmed')], ['the file-only sentence removed', (t) => t.replace(SAY_FILE, '')],
+     ['both halves removed', (t) => t.replace(/is\s+not\s+dimmed/g, 'is dimmed').replace(SAY_FILE, '')]]);
 
   // Scrollbars: the width is reserved, nothing is drawn.
   const scroll = paint('<ui:ScrollView name="S"><ui:Label text="x" /></ui:ScrollView>');
   const noBar = (names) => names.length > 0 && !names.some((n) => /scroller|slider|dragger|tracker/.test(n));
   claim('a ScrollView is built from its viewport and container only; no scrollbar part',
     { holds: noBar(parts(scroll)), seen: parts(scroll).join(', ') },
-    /`ScrollView`[^.]*reserves[^.]*scrollbar and does not draw it/,
+    /`ScrollView`[^.]*reserves[^.]*scrollbar\s+and\s+does\s+not\s+draw\s+it/,
     [['a scroller part appears', () => noBar(parts(scroll).concat('unity-scroller'))], ['a dragger part appears', () => noBar(parts(scroll).concat('unity-dragger'))],
      ['no part at all (the test would pass on nothing)', () => noBar([])]],
-    [['the sentence says it is drawn', (t) => t.replace('does not draw it', 'draws it')], ['the sentence removed', (t) => t.replace(/[^.\n]*reserves[^.]*scrollbar and does not draw it\./, '')],
+    [['the sentence says it is drawn', (t) => t.replace(/and\s+does\s+not\s+draw\s+it\b/, 'and draws it')], ['the sentence removed', (t) => t.replace(/[^.\n]*reserves[^.]*scrollbar\s+and\s+does\s+not\s+draw\s+it\./, '')],
      ['the control renamed', (t) => t.replace('A `ScrollView` reserves', 'A `Box` reserves')]]);
 
   // RepeatButton: bare text, as in Unity.
@@ -853,22 +853,22 @@ section('N — what SKILL.md says the core draws, run against the core');
   const bare = (r, b) => plain(r) && !plain(b);
   claim('a RepeatButton has no background or border where a Button has both',
     { holds: bare(styleOf(rb, 'R'), styleOf(rb, 'B')), seen: 'R ' + (plain(styleOf(rb, 'R')) ? 'plain' : 'styled') + ', B ' + (plain(styleOf(rb, 'B')) ? 'plain' : 'styled') },
-    /`RepeatButton` is bare text/,
+    /`RepeatButton`\s+is\s+bare\s+text/,
     [['the RepeatButton gets a background', () => bare({ backgroundColor: '#959595' }, {})], ['the Button loses its look', () => bare({}, {})],
      ['both styled', () => bare({ borderWidth: '1px' }, { borderWidth: '1px' })]],
-    [['the sentence says it looks like a button', (t) => t.replace('is bare text', 'is a button')], ['the sentence removed', (t) => t.replace(/`RepeatButton` is bare text/g, '')],
-     ['the control renamed', (t) => t.replace('`RepeatButton` is bare text', '`TextElement` is bare text')]]);
+    [['the sentence says it looks like a button', (t) => t.replace(/is\s+bare\s+text/, 'is a button')], ['the sentence removed', (t) => t.replace(/`RepeatButton`\s+is\s+bare\s+text/g, '')],
+     ['the control renamed', (t) => t.replace(/`RepeatButton`(\s+is\s+bare\s+text)/, '`TextElement`$1')]]);
 
   // TextField: no caret, no selection.
   const tf = paint('<ui:TextField name="T" label="l" value="v" />');
   const noCaret = (names) => names.length >= 3 && !names.some((n) => /cursor|caret|selection/.test(n));
   claim('a TextField has its label, input and text; no caret or selection part',
     { holds: noCaret(parts(tf)), seen: parts(tf).join(', ') },
-    /`TextField` does not draw its caret or its selection/,
+    /`TextField`\s+does\s+not\s+draw\s+its\s+caret\s+or\s+its\s+selection/,
     [['a caret part appears', () => noCaret(parts(tf).concat('unity-text-field__cursor'))], ['a selection part appears', () => noCaret(parts(tf).concat('unity-text-field__selection'))],
      ['no part at all', () => noCaret([])]],
-    [['the sentence says it draws them', (t) => t.replace('does not draw its caret', 'draws its caret')], ['the sentence removed', (t) => t.replace(/`TextField` does not draw its caret or its selection/g, '')],
-     ['the control renamed', (t) => t.replace('`TextField` does not draw', '`Slider` does not draw')]]);
+    [['the sentence says it draws them', (t) => t.replace(/does\s+not\s+draw\s+its\s+caret/, 'draws its caret')], ['the sentence removed', (t) => t.replace(/`TextField`\s+does\s+not\s+draw\s+its\s+caret\s+or\s+its\s+selection/g, '')],
+     ['the control renamed', (t) => t.replace(/`TextField`(\s+does\s+not\s+draw)/, '`Slider`$1')]]);
   [written, forced, everywhere, scroll, rb, tf].forEach((p) => p.r.dispose());
 }
 

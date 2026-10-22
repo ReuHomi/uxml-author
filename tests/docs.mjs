@@ -96,14 +96,14 @@ section('the theme the document describes is the theme the scripts take');
   // Both halves of one claim, so each can be broken on its own below.
   const documented = (doc, src) =>
     /"theme"/.test(doc) && src.includes('job.theme') &&
-    /game screen[^.]*`runtime`/.test(doc) && /editor window[^.]*`editor`/.test(doc) &&
-    /first line of the report[^.]*theme/.test(doc) && /nothing is painted behind the panel/.test(doc);
+    /game\s+screen[^.]*`runtime`/.test(doc) && /editor\s+window[^.]*`editor`/.test(doc) &&
+    /first\s+line\s+of\s+the\s+report[^.]*theme/.test(doc) && /nothing\s+is\s+painted\s+behind\s+the\s+panel/.test(doc);
   expect(typeof preview.theme === 'string', 'the documented preview job carries a theme');
   expect(documented(SKILL, pSrc), 'SKILL.md says when to use each theme, where the report names it, and what is behind the panel; preview.mjs reads job.theme');
-  expect(!documented(SKILL.replace(/game screen[^.]*`runtime`/, ''), pSrc), 'mutation (no word on game screens) → the claim check fails');
+  expect(!documented(SKILL.replace(/game\s+screen[^.]*`runtime`/, ''), pSrc), 'mutation (no word on game screens) → the claim check fails');
   expect(!documented(SKILL, pSrc.replace('job.theme', 'job.skin')), 'mutation (preview.mjs reads another key) → the claim check fails');
-  expect(!documented(SKILL.replace(/first line of the report/g, 'last line of the report'), pSrc), 'mutation (the wrong line named) → the claim check fails');
-  expect(!documented(SKILL.replace(/nothing is painted behind the panel/g, 'a dark panel is painted'), pSrc), 'mutation (the backdrop described wrongly) → the claim check fails');
+  expect(!documented(SKILL.replace(/first\s+line\s+of\s+the\s+report/g, 'last line of the report'), pSrc), 'mutation (the wrong line named) → the claim check fails');
+  expect(!documented(SKILL.replace(/nothing\s+is\s+painted\s+behind\s+the\s+panel/g, 'a dark panel is painted'), pSrc), 'mutation (the backdrop described wrongly) → the claim check fails');
 
   writeFileSync(T + 'ThemeScreen.uxml', `<ui:UXML xmlns:ui="UnityEngine.UIElements"><ui:Button name="B" text="Use" /></ui:UXML>`);
   const themed = (theme) => {
@@ -118,7 +118,7 @@ section('the theme the document describes is the theme the scripts take');
   const unknown = themed('dark');
   expect(unknown.code === 1 && unknown.out.split('\n')[0].startsWith('theme runtime   ') && /Unknown theme 'dark'/.test(unknown.out),
     'an unknown name exits 1, the default is drawn, and the first line says so — as SKILL.md says');
-  expect(/A name the core does not know[^.]*exit 1[^.]*runtime theme is drawn/.test(SKILL), 'SKILL.md says that about an unknown name');
+  expect(/A\s+name\s+the\s+core\s+does\s+not\s+know[^.]*exit\s+1[^.]*runtime\s+theme\s+is\s+drawn/.test(SKILL), 'SKILL.md says that about an unknown name');
 }
 
 section('the exit codes are what the table says');
