@@ -32,6 +32,7 @@ const out = {
   verdict: text(),
   colour: w.document.getElementById('dot').style.background,
   applied: (w.document.getElementById('applied') || { textContent: '' }).textContent,
+  theme: (w.document.getElementById('drawn') || { textContent: '' }).textContent,
   channels,
 };
 await w.happyDOM.close();

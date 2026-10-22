@@ -89,6 +89,38 @@ section('the documented job examples actually run');
   }
 }
 
+section('the theme the document describes is the theme the scripts take');
+{
+  const pSrc = readFileSync(ROOT + 'scripts/preview.mjs', 'utf8');
+  const [preview = {}] = jsonBlocks();
+  // Both halves of one claim, so each can be broken on its own below.
+  const documented = (doc, src) =>
+    /"theme"/.test(doc) && src.includes('job.theme') &&
+    /game screen[^.]*`runtime`/.test(doc) && /editor window[^.]*`editor`/.test(doc) &&
+    /first line of the report[^.]*theme/.test(doc) && /nothing is painted behind the panel/.test(doc);
+  expect(typeof preview.theme === 'string', 'the documented preview job carries a theme');
+  expect(documented(SKILL, pSrc), 'SKILL.md says when to use each theme, where the report names it, and what is behind the panel; preview.mjs reads job.theme');
+  expect(!documented(SKILL.replace(/game screen[^.]*`runtime`/, ''), pSrc), 'mutation (no word on game screens) → the claim check fails');
+  expect(!documented(SKILL, pSrc.replace('job.theme', 'job.skin')), 'mutation (preview.mjs reads another key) → the claim check fails');
+  expect(!documented(SKILL.replace(/first line of the report/g, 'last line of the report'), pSrc), 'mutation (the wrong line named) → the claim check fails');
+  expect(!documented(SKILL.replace(/nothing is painted behind the panel/g, 'a dark panel is painted'), pSrc), 'mutation (the backdrop described wrongly) → the claim check fails');
+
+  writeFileSync(T + 'ThemeScreen.uxml', `<ui:UXML xmlns:ui="UnityEngine.UIElements"><ui:Button name="B" text="Use" /></ui:UXML>`);
+  const themed = (theme) => {
+    writeFileSync(T + 'theme.json', JSON.stringify({ uxml: 'ThemeScreen.uxml', panel: { width: 200, height: 100 }, theme, out: 'theme.html' }));
+    try { return { code: 0, out: execFileSync('node', [ROOT + 'scripts/preview.mjs', T + 'theme.json'], { encoding: 'utf8', stdio: 'pipe' }) }; }
+    catch (e) { return { code: e.status, out: String(e.stdout || '') }; }
+  };
+  for (const name of ['runtime', 'editor']) {
+    const r = themed(name);
+    expect(r.code === 0 && r.out.split('\n')[0].startsWith('theme ' + name + '   '), `theme "${name}" runs clean and the report's first line names it: ${r.out.split('\n')[0]}`);
+  }
+  const unknown = themed('dark');
+  expect(unknown.code === 1 && unknown.out.split('\n')[0].startsWith('theme runtime   ') && /Unknown theme 'dark'/.test(unknown.out),
+    'an unknown name exits 1, the default is drawn, and the first line says so — as SKILL.md says');
+  expect(/A name the core does not know[^.]*exit 1[^.]*runtime theme is drawn/.test(SKILL), 'SKILL.md says that about an unknown name');
+}
+
 section('the exit codes are what the table says');
 {
   expect(/\|\s*0\s*\|.*ran, clean/.test(SKILL), 'the table documents 0');
@@ -152,6 +184,19 @@ section('the controls called unsupported are unsupported');
 
   supported.forEach((c) =>
     expect(new RegExp('`' + c + '`').test(SKILL), `${c} is supported and SKILL.md mentions it`));
+
+  // The sentence that tells the model to warn the person first must not name a control the
+  // preview now draws: "mostly Toggle, Slider" was true of 0.5.1 and is false of 0.7.1.
+  const said = SKILL.indexOf('Say so before you begin when a screen is mostly');
+  expect(said !== -1, 'SKILL.md still has the sentence about screens made mostly of controls the preview cannot draw');
+  const warnSentence = said === -1 ? '' : SKILL.slice(said, SKILL.indexOf('\n\n', said));
+  const warned = [...warnSentence.matchAll(/`([A-Z]\w+)`/g)].map((m) => m[1]);
+  expect(warned.length >= 2, 'it names some controls: ' + warned.join(', '));
+  const noneDrawn = (names, drawn) => names.length >= 2 && names.every((c) => !drawn.includes(c));
+  expect(noneDrawn(warned, supported), `none of them is drawn by the core: ${warned.join(', ')}`);
+  expect(!noneDrawn(warned, supported.concat(warned[0] || 'X')), 'mutation (the core starts drawing one of them) → the check fails');
+  expect(!noneDrawn(warned.concat('Toggle'), supported), 'mutation (the stale example Toggle is named) → the check fails');
+  expect(!noneDrawn(warned.slice(0, 1), supported), 'mutation (only one control named) → the check fails');
 
   const trustPara = SKILL.slice(SKILL.indexOf('- **Trust** the geometry'));
   const trusted = [...trustPara.slice(0, trustPara.indexOf('\n-')).matchAll(/`([A-Z]\w+)`/g)].map((m) => m[1]);

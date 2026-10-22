@@ -39,7 +39,7 @@ const UXML_BASIC = `<ui:UXML xmlns:ui="UnityEngine.UIElements">
   <Style src="Styles/Main.uss" />
   <ui:VisualElement name="Panel">
     <ui:Label name="Title" text="Inventory" />
-    <ui:Toggle name="SoundToggle" label="Sound" />
+    <ui:MinMaxSlider name="RangeSlider" />
     <ui:Image name="Icon" />
   </ui:VisualElement>
 </ui:UXML>`;
@@ -51,6 +51,9 @@ const SHEETS = {
 #Icon { width: 48px; height: 48px; background-image: url("Assets/UI/icon.png"); }`,
   'Styles/Theme.uss': `#Panel { width: 260px; padding: 12px; }`,
 };
+
+// A property the core still does not lay out (core tests/contract-060/text-and-fonts.test.ts, D6).
+const AUTO = '#P { -unity-text-auto-size: best-fit 8px 40px; }';
 
 const DATA_URI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLh8QAAAABJRU5ErkJggg==';
 
@@ -83,10 +86,10 @@ section('C — collapse excludes what is already reported, and is not vacuous');
   const C = loadCheck();
   const s = stage();
   const res = C.run(core, s, { uxml: UXML_BASIC, sheets: SHEETS, panel: PANEL });
-  expect(res.unsupported.length === 1, 'Toggle reported as unsupported');
-  expect(!res.collapsed.some((c) => c.name === 'SoundToggle'), 'Toggle not counted a second time as collapsed');
+  expect(res.unsupported.length === 1, 'MinMaxSlider reported as unsupported');
+  expect(!res.collapsed.some((c) => c.name === 'RangeSlider'), 'MinMaxSlider not counted a second time as collapsed');
   const zero = res.boxes.filter((b) => b.name && (b.box.width === 0 || b.box.height === 0));
-  expect(zero.some((b) => b.name === 'SoundToggle'),
+  expect(zero.some((b) => b.name === 'RangeSlider'),
     'a zero-size named node really exists — the exclusion skipped something, it did not find nothing');
   res.dispose();
 }
@@ -94,8 +97,8 @@ section('C — collapse excludes what is already reported, and is not vacuous');
   const C = loadCheck((s) => s.replace('      if (excluded.has(id)) return;', ''));
   const s = stage();
   const res = C.run(core, s, { uxml: UXML_BASIC, sheets: SHEETS, panel: PANEL });
-  expect(res.collapsed.some((c) => c.name === 'SoundToggle'),
-    'mutation (drop the exclusion) → Toggle appears in collapsed, so the rule does something');
+  expect(res.collapsed.some((c) => c.name === 'RangeSlider'),
+    'mutation (drop the exclusion) → MinMaxSlider appears in collapsed, so the rule does something');
   res.dispose();
 }
 
@@ -611,10 +614,10 @@ function probeTable(C) {
 section('L — warnings are sorted by what the core says they are about');
 {
   const C = loadCheck();
-  const one = (uss, uxmlBody = '<ui:Label name="P" text="hi" />') => {
+  const one = (uss, uxmlBody = '<ui:Label name="P" text="hi" />', extra = {}) => {
     const res = C.run(core, stage(), {
       uxml: `<ui:UXML xmlns:ui="UnityEngine.UIElements"><Style src="W.uss" />${uxmlBody}</ui:UXML>`,
-      sheets: { 'W.uss': '#P { width: 100px; height: 40px; } ' + uss }, panel: PANEL,
+      sheets: { 'W.uss': '#P { width: 100px; height: 40px; } ' + uss }, panel: PANEL, ...extra,
     });
     res.dispose();
     return res;
@@ -623,10 +626,13 @@ section('L — warnings are sorted by what the core says they are about');
   const shadow = one('#P { text-shadow: 1px 1px 0 black; }');
   expect(has(shadow.unsupported, 'text-shadow') && !has(shadow.other, 'text-shadow') && shadow.layoutGaps.length === 0,
     'text-shadow (not-rendered, no layout effect) → "not drawn by this preview", not a defect');
-  const aspect = one('#P { aspect-ratio: 2; }');
-  expect(has(aspect.layoutGaps, 'aspect-ratio') && !has(aspect.unsupported, 'aspect-ratio'),
-    'aspect-ratio (not-rendered, affectsLayout) → its own channel');
-  expect(C.judge(aspect, {}).code === 3, 'and on its own that is code 3');
+  const auto = one(AUTO);
+  expect(has(auto.layoutGaps, '-unity-text-auto-size') && !has(auto.unsupported, '-unity-text-auto-size'),
+    '-unity-text-auto-size (not-rendered, affectsLayout) → its own channel');
+  expect(C.judge(auto, {}).code === 3, 'and on its own that is code 3');
+  const aspectNow = one('#P { aspect-ratio: 2; }');
+  expect(!aspectNow.layoutGaps.length && !aspectNow.unsupported.length && C.judge(aspectNow, {}).code === 0,
+    'aspect-ratio is laid out by the core now: no warning, code 0 — so it is no longer a layout-gap sample');
   const typo = one('#P { colour: red; }');
   expect(has(typo.other, 'colour') && C.judge(typo, {}).code === 1, 'colour (not-uss) → a defect, code 1');
   const font = one('#P { font-family: Arial; }');
@@ -637,14 +643,51 @@ section('L — warnings are sorted by what the core says they are about');
   const root = one(':root { width: 380px; }');
   expect(root.matchesUnity.some((w) => w.subject && w.subject.selector === ':root') && C.judge(root, {}).code === 0,
     ':root (matches-unity) → listed as nothing to do, code 0');
-  const button = one('', '<ui:Button name="P" text="b" />');
-  expect(button.versionDependent.length > 0 && C.judge(button, {}).code === 0, 'theme defaults (version-dependent) keep their channel, code 0');
-  const both = one('#P { aspect-ratio: 2; } #Z { width: 0; }', '<ui:Label name="P" text="hi" /><ui:Image name="Z" />');
+  // A Button with no text on the editor theme is 4px high on Unity 6000.0.40f1 and 19px on 6000.3.25f1
+  // (core CHANGELOG 0.7.0, "Applying the theme is no longer a warning").
+  const button = one('', '<ui:Button name="P" />', { theme: 'editor' });
+  expect(button.versionDependent.length > 0 && C.judge(button, {}).code === 0, 'a Button with no text on the editor theme (version-dependent) keeps its channel, code 0');
+  const themed = one('', '<ui:Button name="P" text="b" />');
+  expect(themed.versionDependent.length === 0 && themed.other.length === 0,
+    'using the runtime theme is not a warning any more: the channel stays empty for a Button with text');
+  const both = one(AUTO + ' #Z { width: 0; }', '<ui:Label name="P" text="hi" /><ui:Image name="Z" />');
   const j = C.judge(both, {});
   expect(j.code === 1 && j.problems.some((p) => /#Z has no size.*by this preview's layout/.test(p)),
     'a collapse next to a layout gap is still 1, and says it is this preview\'s layout');
   expect(!C.judge(typo, {}).problems.some((p) => /this preview's layout/.test(p)) ,
     'and without a gap, no such caveat');
+
+  // Real core output for text the default font cannot draw, and for rich text. Both carry
+  // affectsLayout: true (checked against the 0.7.1 bundle), so both are layout gaps.
+  const hangul = one('', '<ui:Label name="P" text="한글" />');
+  expect(has(hangul.layoutGaps, '-unity-font-definition') && hangul.other.length === 0 && C.judge(hangul, {}).code === 3,
+    'Hangul in the default font (font-fallback, affectsLayout) → a layout gap, code 3, not a defect');
+  const hangulEditor = one('', '<ui:Label name="P" text="한글" />', { theme: 'editor' });
+  expect(has(hangulEditor.layoutGaps, '-unity-font-definition') && C.judge(hangulEditor, {}).code === 3,
+    'and the same on the editor theme');
+  const rich = one('', '<ui:Label name="P" text="&lt;b&gt;hi&lt;/b&gt;" />');
+  expect(has(rich.layoutGaps, 'enable-rich-text') && rich.other.length === 0 && C.judge(rich, {}).code === 3,
+    'a rich text tag (not-rendered, affectsLayout) → a layout gap, code 3');
+  const richOff = one('', '<ui:Label name="P" enable-rich-text="false" text="&lt;b&gt;hi&lt;/b&gt;" />');
+  expect(!richOff.layoutGaps.length && !richOff.other.length && C.judge(richOff, {}).code === 0,
+    'and with enable-rich-text="false" Unity draws the characters too: nothing to report');
+  const fb = (affects) => ({ kind: 'unsupported-property', reason: 'font-fallback', message: 'core words',
+    subject: Object.assign({ kind: 'property', property: '-unity-font-definition', missingGlyphs: 'hangul' }, affects === undefined ? {} : { affectsLayout: affects }) });
+  expect(C.classify(fb(true)) === 'layoutGaps', 'font-fallback that affects layout → layoutGaps');
+  expect(C.classify(fb(false)) === 'unsupported' && C.classify(fb(undefined)) === 'unsupported',
+    'font-fallback that does not (false or absent) → unsupported, not a defect');
+  expect(C.classify({ kind: 'unsupported-property', reason: 'font-fallback', message: 'x' }) === 'unsupported',
+    'font-fallback with no subject at all → unsupported');
+  const HINT = /-unity-font-definition removes this warning; this preview cannot load font assets/;
+  const gap = C.describeGap(fb(true));
+  expect(gap.indexOf('-unity-font-definition: core words') === 0 && HINT.test(gap),
+    'a font-fallback gap reads: the core\'s words, then one line on setting the font: ' + gap);
+  const notDrawn = (w) => typeof C.describeNotDrawn === 'function' ? C.describeNotDrawn(w) : '(describeNotDrawn does not exist)';
+  const note = notDrawn(fb(false));
+  expect(note.indexOf('core words') === 0 && HINT.test(note), 'and so does a font-fallback in the "not drawn" list');
+  expect(notDrawn({ kind: 'unsupported-property', reason: 'not-rendered', message: 'plain core words' }) === 'plain core words' &&
+    !HINT.test(C.describeGap({ kind: 'unsupported-property', reason: 'not-rendered', message: 'm', subject: { kind: 'property', property: 'aspect-ratio' } })),
+    'while any other warning is the core\'s words, unchanged');
 
   // Open sets: values the core may add later are not guessed at.
   const cls = (w) => C.classify(w);
@@ -666,8 +709,8 @@ section('L — warnings are sorted by what the core says they are about');
       sheets: { 'W.uss': '#P { width: 100px; height: 40px; } ' + uss }, panel: PANEL });
     r.dispose(); return C.judge(r, {}).code;
   };
-  expect(run1(M("        return subj && subj.affectsLayout === true ? 'layoutGaps' : 'unsupported';", "        return 'unsupported';"), '#P { aspect-ratio: 2; }') === 0,
-    'mutation (affectsLayout ignored) → aspect-ratio passes as 0, so the case above catches it');
+  expect(run1(M("        return subj && subj.affectsLayout === true ? 'layoutGaps' : 'unsupported';", "        return 'unsupported';"), AUTO) === 0,
+    'mutation (affectsLayout ignored) → -unity-text-auto-size passes as 0, so the case above catches it');
   expect(run1(M("      case 'not-uss':\n", "      case 'not-uss':\n        return 'unsupported';\n"), '#P { colour: red; }') !== 1,
     'mutation (not-uss filed as "not drawn") → the colour typo stops failing, so the case above catches it');
   expect(run1(M("      case 'matches-unity':\n        return subj && subj.kind === 'name' ? 'repeatedNames' : 'matchesUnity';\n", ''), ':root { width: 380px; }') === 1,
@@ -684,11 +727,149 @@ section('L — warnings are sorted by what the core says they are about');
     .judge({ painted: { childCount: 1, elementCount: 1, boxCount: 1 }, unindexed: [], ambiguousDeps: [], cascadeMismatch: [], collapsed: [], overflow: [], other: [],
              layoutGaps: [{ reason: 'not-rendered' }] }, {}).code === 0,
     'mutation (layout gaps not in the verdict) → code 0 where it must be 3');
+  // font-fallback and rich text, through the same kind of mutation. A mutation whose target is
+  // absent from check.js tested nothing, and says so.
+  const tryM = (from, to) => { try { return M(from, to); } catch (e) { expect(false, e.message); return null; } };
+  const code = (C, body, uss = '', extra = {}) => {
+    if (!C) return null;
+    const r = C.run(core, stage(), { uxml: `<ui:UXML xmlns:ui="UnityEngine.UIElements"><Style src="W.uss" />${body}</ui:UXML>`,
+      sheets: { 'W.uss': '#P { width: 100px; height: 40px; } ' + uss }, panel: PANEL, ...extra });
+    r.dispose(); return C.judge(r, {}).code;
+  };
+  const HANGUL = '<ui:Label name="P" text="한글" />', RICH = '<ui:Label name="P" text="&lt;b&gt;hi&lt;/b&gt;" />';
+  const FB = "      case 'font-fallback':\n        return subj && subj.affectsLayout === true ? 'layoutGaps' : 'unsupported';\n";
+  expect(code(tryM(FB, ''), HANGUL) === 1,
+    'mutation (font-fallback unhandled) → it falls to the default and Hangul text fails the run, so the case above catches it');
+  expect(code(tryM(FB, "      case 'font-fallback':\n        return 'unsupported';\n"), HANGUL) === 0,
+    'mutation (font-fallback ignores affectsLayout, always "not drawn") → Hangul passes as 0');
+  const always = tryM(FB, "      case 'font-fallback':\n        return 'layoutGaps';\n");
+  expect(always && always.classify({ kind: 'unsupported-property', reason: 'font-fallback', message: 'x', subject: { kind: 'property', affectsLayout: false } }) !== 'unsupported',
+    'mutation (font-fallback always a layout gap) → one that does not affect layout is filed wrongly');
+  expect(code(M("        return subj && subj.affectsLayout === true ? 'layoutGaps' : 'unsupported';", "        return 'unsupported';"), RICH) === 0,
+    'mutation (affectsLayout ignored) → rich text passes as 0');
+  expect(code(M("      case 'not-rendered':\n", "      case 'not-rendered-x':\n"), RICH) === 1,
+    'mutation (not-rendered unhandled) → rich text fails the run');
+  expect(code(M("code: problems.length ? 1 : (overBudget.length || layoutGaps.length) ? 3 : 0", "code: problems.length ? 1 : overBudget.length ? 3 : 0"), RICH) === 0,
+    'mutation (layout gaps not in the verdict) → rich text passes as 0');
+  const hintGone = tryM("function fontHint(", "function fontHintOff(");
+  const gapOf = (C) => C && C.describeGap({ kind: 'unsupported-property', reason: 'font-fallback', message: 'core words',
+    subject: { kind: 'property', property: '-unity-font-definition', affectsLayout: true } });
+  expect(hintGone === null || !/removes this warning/.test(String(gapOf(hintGone))),
+    'mutation (the font hint renamed away) → the hint disappears from the gap line');
   const NoBasis = M("var basis = (res.layoutGaps || []).length ?", "var basis = false ?");
   const rb = NoBasis.run(core, stage(), { uxml: '<ui:UXML xmlns:ui="UnityEngine.UIElements"><Style src="W.uss" /><ui:Label name="P" text="hi" /><ui:Image name="Z" /></ui:UXML>',
-    sheets: { 'W.uss': '#P { width: 100px; height: 40px; aspect-ratio: 2; }' }, panel: PANEL });
+    sheets: { 'W.uss': '#P { width: 100px; height: 40px; -unity-text-auto-size: best-fit 8px 40px; }' }, panel: PANEL });
   rb.dispose();
   expect(!NoBasis.judge(rb, {}).problems.some((p) => /this preview's layout/.test(p)), 'mutation (no preview-basis label) → the caveat case catches it');
+}
+
+section('M — the theme is passed to the core, and what was drawn is what is reported');
+{
+  const C = loadCheck();
+  const LABEL = '<ui:UXML xmlns:ui="UnityEngine.UIElements"><ui:Label name="P" text="hi" /></ui:UXML>';
+  const go = (Chk, extra) => { const r = Chk.run(core, stage(), { uxml: LABEL, panel: PANEL, ...extra }); r.dispose(); return r; };
+  const height = (r) => r.boxes.find((b) => b.name === 'P').box.height;
+  const isBad = (r) => r.other.some((w) => w.kind === 'malformed' && w.reason === 'invalid-value' && /Unknown theme 'dark'/.test(w.message));
+  const def = go(C, {}), rt = go(C, { theme: 'runtime' }), ed = go(C, { theme: 'editor' }), bad = go(C, { theme: 'dark' });
+  expect(def.theme === 'runtime' && rt.theme === 'runtime' && height(def) === height(rt) && !def.other.length,
+    'no theme asked → the core\'s default, runtime, is drawn and reported, with no warning');
+  expect(ed.theme === 'editor' && height(ed) !== height(def) && !ed.other.length,
+    `theme: "editor" reaches the renderer and is reported: Label ${height(ed)}px against ${height(def)}px`);
+  expect(bad.theme === 'runtime' && height(bad) === height(def),
+    'an unknown theme draws the default, and the result says runtime — what was drawn, not what was asked');
+  expect(isBad(bad) && C.judge(bad, {}).code === 1 && C.judge(bad, {}).problems.some((p) => /Unknown theme 'dark'/.test(p)),
+    'and the core\'s warning lands in "other": code 1, named in the problems');
+  expect(go(C, { theme: null }).other.length === 1, 'null is a value, not "unset": the core judges it too');
+
+  // Each mutation breaks one hand-off between the job and the core.
+  const T = (from, to) => { try { return loadCheck((x) => { if (!x.includes(from)) throw new Error('mutation target missing: ' + from); return x.replace(from, to); }); }
+                            catch (e) { expect(false, e.message); return null; } };
+  const pass = T('theme: input.theme,', '');
+  expect(pass && go(pass, { theme: 'editor' }).theme === 'runtime',
+    'mutation (the theme never reaches the core) → "editor" is drawn as runtime, so the case above catches it');
+  const echo = T('theme: r.theme,', "theme: input.theme || 'runtime',");
+  expect(echo && go(echo, { theme: 'dark' }).theme === 'dark',
+    'mutation (report what was asked, not what was drawn) → the unknown theme is reported as "dark"');
+  const swallow = T('theme: input.theme,', "theme: input.theme === 'editor' ? 'editor' : undefined,");
+  expect(swallow && !isBad(go(swallow, { theme: 'dark' })),
+    'mutation (an unknown theme quietly replaced before the core sees it) → the warning is lost and the run passes');
+  const dropped = T('theme: r.theme,', '');
+  expect(dropped && go(dropped, {}).theme === undefined,
+    'mutation (the result carries no theme) → the report has nothing to print');
+}
+
+section('N — what SKILL.md says the core draws, run against the core');
+{
+  // Each claim has two halves: the core really does it, and the document says so. A claim is
+  // tested by making each half wrong in turn; a half that can be broken without the check
+  // noticing is not guarding anything.
+  const C = loadCheck();
+  const SKILL = readFileSync(root + 'SKILL.md', 'utf8');
+  const paint = (body, extra = {}) => {
+    const el = stage();
+    const r = C.run(core, el, { uxml: `<ui:UXML xmlns:ui="UnityEngine.UIElements">${body}</ui:UXML>`, panel: PANEL, ...extra });
+    return { el, r };
+  };
+  const styleOf = (p, name) => { const b = p.r.boxes.find((x) => x.name === name); return p.el.querySelector('[data-uxml-node="' + b.id + '"]').style; };
+  const parts = (p) => [...p.el.querySelectorAll('[data-uxml-part]')].map((e) => e.getAttribute('data-uxml-part'));
+  const claim = (what, core_, say, badCore, badDoc) => {
+    expect(core_.holds, 'the core: ' + what + ' — ' + core_.seen);
+    expect(say.test(SKILL), 'SKILL.md says it');
+    badCore.forEach(([why, f]) => expect(!f(), `mutation (${why}) → the core half fails`));
+    badDoc.forEach(([why, f]) => expect(!say.test(f(SKILL)), `mutation (${why}) → the document half fails`));
+  };
+
+  // Disabled: only the element written enabled="false" is dimmed (core CHANGELOG 0.7.0, "Only the
+  // element written `enabled="false"` is dimmed" and "A state forced through `states` stays on that element").
+  const written = paint('<ui:Button name="B" text="a" enabled="false" />');
+  const forced = paint('<ui:Button name="B" text="a" />', { states: { '#B': ['disabled'] } });
+  const everywhere = paint('<ui:Button name="B" text="a" />', { activeStates: ['disabled'] });
+  const dims = (p) => styleOf(p, 'B').opacity;
+  const disabledHolds = (w, f, e) => w === '0.5' && !f && !e;
+  const SAY_FORCED = /forced[^.]*`disabled`[^.]*is not dimmed/, SAY_FILE = /Only `enabled="false"` written in the UXML dims/;
+  claim('enabled="false" dims; a disabled forced through states or activeStates does not',
+    { holds: disabledHolds(dims(written), dims(forced), dims(everywhere)),
+      seen: `${dims(written)} / ${dims(forced) || 'not dimmed'} / ${dims(everywhere) || 'not dimmed'}` },
+    { test: (t) => SAY_FORCED.test(t) && SAY_FILE.test(t) },
+    [['forced disabled dims', () => disabledHolds('0.5', '0.5', '')], ['enabled="false" does not dim', () => disabledHolds('', '', '')],
+     ['activeStates dims', () => disabledHolds('0.5', '', '0.5')]],
+    [['"is not dimmed" removed', (t) => t.replace(/is not dimmed/g, 'is dimmed')], ['the file-only sentence removed', (t) => t.replace(SAY_FILE, '')],
+     ['both halves removed', (t) => t.replace(/is not dimmed/g, 'is dimmed').replace(SAY_FILE, '')]]);
+
+  // Scrollbars: the width is reserved, nothing is drawn.
+  const scroll = paint('<ui:ScrollView name="S"><ui:Label text="x" /></ui:ScrollView>');
+  const noBar = (names) => names.length > 0 && !names.some((n) => /scroller|slider|dragger|tracker/.test(n));
+  claim('a ScrollView is built from its viewport and container only; no scrollbar part',
+    { holds: noBar(parts(scroll)), seen: parts(scroll).join(', ') },
+    /`ScrollView`[^.]*reserves[^.]*scrollbar and does not draw it/,
+    [['a scroller part appears', () => noBar(parts(scroll).concat('unity-scroller'))], ['a dragger part appears', () => noBar(parts(scroll).concat('unity-dragger'))],
+     ['no part at all (the test would pass on nothing)', () => noBar([])]],
+    [['the sentence says it is drawn', (t) => t.replace('does not draw it', 'draws it')], ['the sentence removed', (t) => t.replace(/[^.\n]*reserves[^.]*scrollbar and does not draw it\./, '')],
+     ['the control renamed', (t) => t.replace('A `ScrollView` reserves', 'A `Box` reserves')]]);
+
+  // RepeatButton: bare text, as in Unity.
+  const rb = paint('<ui:RepeatButton name="R" text="r" /><ui:Button name="B" text="b" />');
+  const plain = (s) => !s.backgroundColor && !s.borderWidth;
+  const bare = (r, b) => plain(r) && !plain(b);
+  claim('a RepeatButton has no background or border where a Button has both',
+    { holds: bare(styleOf(rb, 'R'), styleOf(rb, 'B')), seen: 'R ' + (plain(styleOf(rb, 'R')) ? 'plain' : 'styled') + ', B ' + (plain(styleOf(rb, 'B')) ? 'plain' : 'styled') },
+    /`RepeatButton` is bare text/,
+    [['the RepeatButton gets a background', () => bare({ backgroundColor: '#959595' }, {})], ['the Button loses its look', () => bare({}, {})],
+     ['both styled', () => bare({ borderWidth: '1px' }, { borderWidth: '1px' })]],
+    [['the sentence says it looks like a button', (t) => t.replace('is bare text', 'is a button')], ['the sentence removed', (t) => t.replace(/`RepeatButton` is bare text/g, '')],
+     ['the control renamed', (t) => t.replace('`RepeatButton` is bare text', '`TextElement` is bare text')]]);
+
+  // TextField: no caret, no selection.
+  const tf = paint('<ui:TextField name="T" label="l" value="v" />');
+  const noCaret = (names) => names.length >= 3 && !names.some((n) => /cursor|caret|selection/.test(n));
+  claim('a TextField has its label, input and text; no caret or selection part',
+    { holds: noCaret(parts(tf)), seen: parts(tf).join(', ') },
+    /`TextField` does not draw its caret or its selection/,
+    [['a caret part appears', () => noCaret(parts(tf).concat('unity-text-field__cursor'))], ['a selection part appears', () => noCaret(parts(tf).concat('unity-text-field__selection'))],
+     ['no part at all', () => noCaret([])]],
+    [['the sentence says it draws them', (t) => t.replace('does not draw its caret', 'draws its caret')], ['the sentence removed', (t) => t.replace(/`TextField` does not draw its caret or its selection/g, '')],
+     ['the control renamed', (t) => t.replace('`TextField` does not draw', '`Slider` does not draw')]]);
+  [written, forced, everywhere, scroll, rb, tf].forEach((p) => p.r.dispose());
 }
 
 section('H — no silent default panel size');
