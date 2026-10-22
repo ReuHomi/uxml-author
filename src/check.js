@@ -116,41 +116,55 @@
     return { resolve: resolve, requested: requested, missing: missing, ambiguous: ambiguous };
   }
 
-  // The states a Unity element can be in are the core's USS_STATES (0.5.1+),
-  // transcribed there from Unity's pseudo-class page without `:root` (a place
-  // in the tree, not a state) and `:selected` (USS does not support it). This
-  // file kept its own copy until the core exported one; a second copy is a
-  // second place to forget when Unity adds a state. Anything outside the list
-  // is a name Unity never puts on an element, so a preview that applied it
-  // would show a screen that cannot exist.
-  var PROBE_SHEET = '__uxml-author-state-probe__.uss';
-  var PROBE_PROP = '--uxml-author-state-probe-';
-  var ROOT_OPEN = /<([A-Za-z_][\w.-]*:)?UXML\b[^>]*>/;
-  // A pseudo-class other than :root — the ones that name a state.
-  var STATE_IN_KEY = /:(?!root\b)[A-Za-z-]/;
-
-  function stripEnabled(node) {
-    node.attributes = node.attributes.filter(function (a) { return a.name !== 'enabled'; });
-    for (var i = 0; i < node.children.length; i++) stripEnabled(node.children[i]);
-  }
-
-  function stateList(value, where, errors, allowed) {
+  // A `states` key is judged by the core. Since 0.6.0 it reports a key it cannot apply as data —
+  // `subject: { kind: 'states-key', key, problem?, state? }` — and measures the key itself, in the
+  // context it measured: no state in scope, so a key that needs one never selects anything. This file
+  // used to keep a probe stylesheet and a copy of the state list to reach the same verdicts; the two
+  // were compared on every case the suites carry and the core agreed on all of them, so they are gone
+  // (core CHANGELOG 0.6.0, "For consumers": "uxml-author master assumes the 0.5.1 meaning").
+  //
+  // What the core is silent about stays here, and is checked before it is asked:
+  //   - a name in `activeStates` (the core applies "hovr" to every element without a word), checked
+  //     against the core's own USS_STATES
+  //   - a key with a `{` in it (the core accepts "#Use { x" and applies nothing)
+  // and the shape of the job's values, which the core would answer with a TypeError.
+  function stateList(value, where, errors, list, enforce) {
     if (!Array.isArray(value)) {
-      // A string is iterable, and the core would quietly apply "h", "o", "v",
-      // "e", "r" — none of which matches anything. Refused by name for that reason.
+      // A string is iterable and the core throws on it; either way nothing would be applied.
       errors.push(where + ' must be an array of state names, got ' +
         (typeof value === 'string' ? 'the string ' + JSON.stringify(value) : JSON.stringify(value)));
       return null;
     }
     var ok = true;
     value.forEach(function (n) {
-      if (typeof n !== 'string' || allowed.indexOf(n) === -1) {
+      if (typeof n !== 'string' || (enforce && list.indexOf(n) === -1)) {
         errors.push(where + ' names ' + JSON.stringify(n) + ', which is not a Unity state; use one of ' +
-          allowed.join(', '));
+          list.join(', '));
         ok = false;
       }
     });
     return ok ? value.slice() : null;
+  }
+
+  var PSEUDO_IN_KEY_HINT = ' — a key is matched before any state is applied, so a state pseudo-class in the ' +
+    'key itself never matches; select the element without it';
+
+  /** The skill's words for what the core said about one key. A problem this version does not know is
+   *  refused all the same, in the core's own words — `problem` is an open set. */
+  function describeStatesKey(w, states) {
+    var subj = w.subject, key = JSON.stringify(subj.key);
+    switch (subj.problem) {
+      case 'matches-nothing':
+        return 'states key ' + key + ' matches no element in the document';
+      case 'state-in-key':
+        return 'states key ' + key + ' matches no element in the document' + PSEUDO_IN_KEY_HINT;
+      case 'unknown-state':
+        return 'states[' + key + '] names ' + JSON.stringify(subj.state) + ', which is not a Unity state';
+      case undefined:
+        return 'states key ' + key + ' is not a usable USS selector';
+      default:
+        return 'states key ' + key + ' was refused by the core (' + subj.problem + '): ' + w.message;
+    }
   }
 
   /**
@@ -159,10 +173,6 @@
    * Ensures: `errors` is empty, or the render must not happen — the screen it
    *          would judge is not the one asked about. Every refusal names the
    *          key or value and why.
-   *          A states key must match at least one element. That is asked of
-   *          the core's own selector matching, through a probe stylesheet in a
-   *          SEPARATELY parsed copy of the document: the probe never reaches
-   *          the render, the boxes, the warnings or the dependency lists.
    */
   function checkStates(core, input) {
     var errors = [];
@@ -179,65 +189,21 @@
           errors.push('states key ' + JSON.stringify(key) + ' is not a selector');
           return;
         }
-        var list = stateList(rawStates[key], 'states[' + JSON.stringify(key) + ']', errors, allowed);
+        // No list here: which names are states is the core's to say, once it is asked below.
+        var list = stateList(rawStates[key], 'states[' + JSON.stringify(key) + ']', errors, allowed, false);
         if (list) states[key] = list;
       });
     }
-    var active = stateList(rawActive, 'activeStates', errors, allowed) || [];
+    var active = stateList(rawActive, 'activeStates', errors, allowed, true) || [];
     var activeSet = new Set(active);
 
-    var keys = Object.keys(states);
-    if (!errors.length && keys.length) {
-      var parseWith = function (text, extra) {
-        var res = makeResolver(input.sheets || {}, input.templates || {}, extra);
-        return core.expandTemplates(core.parse(text, undefined, { resolveImport: res.resolve })).document;
-      };
-      // First, which keys the core itself refuses as selectors. Since 0.5.1 the
-      // core says so as data — `subject: { kind: 'states-key', key }` — so the
-      // key is read off the warning instead of matched against its wording,
-      // which the core may change in any release. A document's own unsupported
-      // selector has a `selector` subject and keeps its old channel. A refused
-      // key is left out of the probe below, where its text could otherwise
-      // spoil the rules around it.
-      var refused = new Set();
-      core.resolveStyles(parseWith(String(input.uxml), null), { activeStates: activeSet, states: states })
-        .warnings.forEach(function (w) {
-          var subj = w.subject;
-          if (subj && subj.kind === 'states-key' && Object.prototype.hasOwnProperty.call(states, subj.key)) refused.add(subj.key);
-        });
-      var usable = keys.filter(function (k) { return !refused.has(k); });
-      var hit = new Set();
-      if (usable.length) {
-        var probe = usable.map(function (k) { return k + ' { ' + PROBE_PROP + keys.indexOf(k) + ': 1; }'; }).join('\n');
-        var extra = {}; extra[PROBE_SHEET] = probe;
-        var text = String(input.uxml).replace(ROOT_OPEN, function (m) {
-          return /\/>$/.test(m) ? m : m + '<Style src="' + PROBE_SHEET + '" />';
-        });
-        // The probe must see exactly what the core's states-key matching sees,
-        // and that is NO state at all. Measured on uxml-preview 0.5.0: the core
-        // matches each key in a context whose `statesOf` returns a fresh empty
-        // Set — not `activeStates`, and not the `disabled` an `enabled="false"`
-        // attribute gives a subtree. So "#Use:disabled" or "#Use:hover" never
-        // selects anything there, whatever else the job asks for. A probe
-        // that applied those states would pass keys the renderer then
-        // ignores, and the run would report a state it never drew. Hence: no
-        // active states, and the `enabled` attribute removed from this copy.
-        var probeDoc = parseWith(text, extra);
-        stripEnabled(probeDoc.root);
-        core.resolveStyles(probeDoc, { activeStates: new Set(), states: {} }).styles.forEach(function (m) {
-          m.forEach(function (v, prop) {
-            if (prop.indexOf(PROBE_PROP) === 0 && v.origin && v.origin.kind === 'rule') hit.add(prop);
-          });
-        });
-      }
-      keys.forEach(function (k, i) {
-        if (refused.has(k)) errors.push('states key ' + JSON.stringify(k) + ' is not a usable USS selector');
-        else if (!hit.has(PROBE_PROP + i)) {
-          errors.push('states key ' + JSON.stringify(k) + ' matches no element in the document' +
-            (STATE_IN_KEY.test(k)
-              ? ' — a key is matched before any state is applied, so a state pseudo-class in the key itself never matches; select the element without it'
-              : ''));
-        }
+    if (!errors.length && Object.keys(states).length) {
+      var res = makeResolver(input.sheets || {}, input.templates || {}, null);
+      var doc = core.expandTemplates(core.parse(String(input.uxml), undefined, { resolveImport: res.resolve })).document;
+      core.resolveStyles(doc, { activeStates: activeSet, states: states }).warnings.forEach(function (w) {
+        var subj = w.subject;
+        if (!subj || subj.kind !== 'states-key' || !Object.prototype.hasOwnProperty.call(states, subj.key)) return;
+        errors.push(describeStatesKey(w, states));
       });
     }
 
@@ -247,6 +213,30 @@
       activeStates: activeSet,
       applied: { states: states, activeStates: active },
     };
+  }
+
+  /**
+   * Purpose: decide whether the theme a caller asked for is one the core draws.
+   * Ensures: `errors` is empty when `theme` is undefined (the core's default) or the core drew
+   *          exactly what was asked. The core draws its default for a name it does not know and
+   *          warns, with a warning that has no `subject` and so cannot be told from the others by
+   *          its fields; what can be told is the result — `RenderResult.theme` is not the theme
+   *          asked. No list of names is kept here. A screen drawn in a theme nobody asked for is
+   *          not the screen asked about, so the caller refuses to run.
+   * Effects: draws an empty document into `container` and frees it again.
+   */
+  function checkTheme(core, theme, container) {
+    var errors = [];
+    if (theme === undefined) return { errors: errors };
+    var r = core.render(core.parse('<ui:UXML xmlns:ui="UnityEngine.UIElements" />'), container,
+      { size: { width: 1, height: 1 }, theme: theme });
+    var differs = r.theme !== theme, drawn = r.theme;
+    r.dispose();
+    if (differs) {
+      errors.push('theme ' + JSON.stringify(theme) + ' is not a theme the core draws; it would draw ' +
+        JSON.stringify(drawn) + ' instead — use "runtime" or "editor"');
+    }
+    return { errors: errors };
   }
 
   /** One wording for both consumers, so the report and the page name the same thing. */
@@ -295,6 +285,10 @@
     // about. The gate turns this into "did not run", never into a finding.
     var st = checkStates(core, input);
     if (st.errors.length) throw new Error('states refused — ' + st.errors.join('; '));
+
+    // The same for the theme: drawn in one nobody asked for, the screen is not the one asked about.
+    var th = checkTheme(core, input.theme, container.ownerDocument.createElement('div'));
+    if (th.errors.length) throw new Error('theme refused — ' + th.errors.join('; '));
 
     var parsed = core.parse(input.uxml, undefined, { resolveImport: resolveDep });
 
@@ -673,6 +667,6 @@
     run: run, judge: judge, classify: classify, describeDefect: describeDefect, describeGap: describeGap,
     describeNotDrawn: describeNotDrawn, describeTheme: describeTheme,
     resolveSheetUrl: resolveSheetUrl,
-    checkStates: checkStates, describeStates: describeStates,
+    checkStates: checkStates, checkTheme: checkTheme, describeStates: describeStates,
   };
 })();

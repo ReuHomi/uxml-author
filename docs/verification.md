@@ -33,6 +33,17 @@ Notable mutations, and what would slip past without them:
   reason.
 - **skip the match check on a states key** — a selector that names no element
   is applied to nothing, and the run looks like a check of the state it named.
+  The verdict is the core's (`subject.problem`: `matches-nothing`,
+  `state-in-key`, `unknown-state`, or no problem for an unusable selector), read
+  by its fields and never by its wording. The mutations: the core's warnings not
+  read, `matches-nothing` not read, `state-in-key` not read (every key carrying a
+  state passes, with or without `activeStates` and on an `enabled="false"`
+  element — the four situations the skill's own probe used to guard), the core
+  not handed the states, any key the core names counted whether or not the job
+  gave it, and the message matched again. A `problem` this version does not know
+  is refused with the core's words. The skill keeps its own check for exactly
+  what the core is silent about: an unknown name in `activeStates`, and a key
+  with a `{` in it.
 - **count an over-budget image as a problem** — a screen with a large
   background can never exit 0 however correct it is. And the reverse, **let 3
   outrank 1** — a real defect hides behind "the preview may differ from Unity".
@@ -84,10 +95,13 @@ Notable mutations, and what would slip past without them:
 - **leave the theme out of the core's options** — a job asking for the editor
   theme gets the runtime screen, the report says runtime, and everything
   agrees with itself. Caught only by comparing the editor and runtime Label
-  heights. Its three siblings: report what was asked instead of what was drawn
-  (an unknown name is then printed as if it had been drawn), tidy an unknown name
-  before the core sees it (the core's warning, the only trace that the theme was
-  wrong, is lost and the run passes), and return no theme at all.
+  heights. Its siblings: skip the check that the core drew the theme asked (an
+  unknown name is then drawn as runtime and the run goes on), keep a list of one
+  theme in `check.js` (the editor theme is refused), and return no theme at all.
+  An unknown name is refused with code 2 because the core's warning for it has no
+  `subject`, so its fields cannot tell it from other `malformed` warnings; the
+  result can — `RenderResult.theme` is not the theme asked — and nothing here
+  lists theme names.
 - **let `font-fallback` reach the default branch** — a correct Korean screen
   exits 1. Found by the core's own changelog, not by any screen in this
   repository; no existing fixture had Hangul in it. Its siblings: ignore
@@ -110,7 +124,9 @@ Notable mutations, and what would slip past without them:
 - **let the page's backdrop follow its own light/dark switch** — runtime text is
   dark, the core paints nothing behind the panel, and a near-black checkerboard
   makes the default theme unreadable. The stage carries the drawn theme for its
-  backdrop; mutations: follow the job's value, no attribute, a rule missing.
+  backdrop; mutations: follow the job's value (a job with no theme gets none), no
+  attribute, a rule missing, the runtime white changed (the runtime checkerboard
+  is the core playground's own: white and `#cccccc`).
 
 ## Human
 

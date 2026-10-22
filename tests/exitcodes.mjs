@@ -305,6 +305,7 @@ console.log('\nthe theme: the job asks, the core draws, and the report says whic
   // matches nothing: the screen drawn would not be the one asked about. Code 2, no page.
   for (const [theme, what] of [['dark', 'an unknown name'], [null, 'null'], ['', 'an empty name'], [5, 'a number']]) {
     const n = 'theme-bad-' + String(theme === null ? 'null' : theme === '' ? 'empty' : theme);
+    rmSync(TMP + '../out/' + n + '.html', { force: true });   // an earlier run of this suite may have left one
     const r = runJob(job(n, { ...base, theme }));
     expect(r.code === 2 && /the requested theme cannot be used/.test(r.out) && /No preview was written/.test(r.out) && !existsSync(TMP + '../out/' + n + '.html'),
       `${what} as the theme → 2, named, and no preview written (got ${r.code})`);
@@ -354,7 +355,7 @@ console.log('\nthe theme: the job asks, the core draws, and the report says whic
     expect(rule0() === '', 'mutation (the runtime rule renamed away) → the page has no runtime checkerboard');
     function rule0() { return (readFileSync(TMP + '../out/theme-default.html', 'utf8').match(/#viewport\[data-drawn="runtime"\]\s*\{[^}]*\}/) || [''])[0]; }
   });
-  mutate('src/page.html', '#ffffff 25%', '#f2f2f0 25%', () => {
+  mutate('src/page.html', 'background-color: #ffffff', 'background-color: #f2f2f0', () => {
     runJob(TMP + 'theme-default.json');
     expect(!/#ffffff/i.test((readFileSync(TMP + '../out/theme-default.html', 'utf8').match(/#viewport\[data-drawn="runtime"\]\s*\{[^}]*\}/) || [''])[0]),
       'mutation (another white) → the check against the playground\'s colours fails');

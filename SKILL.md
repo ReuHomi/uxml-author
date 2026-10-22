@@ -110,9 +110,9 @@ node scripts/bind-csharp.mjs bind.json
 **Which theme.** Controls without a style of your own are drawn with one of
 Unity's two default themes. For a game screen use `runtime`, the theme a new
 PanelSettings asset gives a UIDocument; for an editor window or an inspector
-tool use `editor`. Leave `theme` out and `runtime` is drawn. A name the core
-does not know is reported (exit 1) and the runtime theme is drawn anyway, so a
-mistyped theme is never mistaken for a checked one. The first line of the
+tool use `editor`. Leave `theme` out and `runtime` is drawn. A name other than
+`runtime` or `editor` stops the run with code 2 and no preview is written,
+because the screen drawn would not be the one asked about. The first line of the
 report and the top of the preview name the theme that was actually drawn; say
 it when you show the result.
 
@@ -152,7 +152,8 @@ combination that was applied, so say it when you show the result.
 
 The run refuses (code 2) rather than guess when the request cannot be honoured:
 a value that is not an array, a name that is not a Unity state, a selector the
-renderer cannot use, or a selector that matches no element. Each of those would
+renderer cannot use, a selector that matches no element, or a theme the core
+does not draw. Each of those would
 otherwise produce a screen that looks checked and is not the one asked about.
 Fix the job and run again.
 
@@ -185,7 +186,7 @@ tell the person which parts to check in Unity.
 
 Code 2 usually means `happy-dom` is missing (`npm install happy-dom`) or the
 panel size is absent. It also means the job asked for something that cannot be
-applied — a state or a budget it got wrong — and the message names which. And
+applied — a state, a theme or a budget it got wrong — and the message names which. And
 it is what a crash looks like: an unexpected error is reported as code 2 with
 the error itself, never as 1, because the run decided nothing. No
 preview is written on code 2. If a `preview.html` is already at the output path,

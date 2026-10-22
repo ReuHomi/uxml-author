@@ -101,7 +101,7 @@ section('the theme the document describes is the theme the scripts take');
   expect(typeof preview.theme === 'string', 'the documented preview job carries a theme');
   expect(documented(SKILL, pSrc), 'SKILL.md says when to use each theme, where the report names it, and what is behind the panel; preview.mjs reads job.theme');
   expect(!documented(SKILL.replace(/game\s+screen[^.]*`runtime`/, ''), pSrc), 'mutation (no word on game screens) → the claim check fails');
-  expect(!documented(SKILL, pSrc.replace('job.theme', 'job.skin')), 'mutation (preview.mjs reads another key) → the claim check fails');
+  expect(!documented(SKILL, pSrc.replace(/job\.theme/g, 'job.skin')), 'mutation (preview.mjs reads another key) → the claim check fails');
   expect(!documented(SKILL.replace(/first\s+line\s+of\s+the\s+report/g, 'last line of the report'), pSrc), 'mutation (the wrong line named) → the claim check fails');
   expect(!documented(SKILL.replace(/nothing\s+is\s+painted\s+behind\s+the\s+panel/g, 'a dark panel is painted'), pSrc), 'mutation (the backdrop described wrongly) → the claim check fails');
 

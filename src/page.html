@@ -89,8 +89,17 @@
   }
   /* The core paints nothing behind the panel, so what shows through is the page's to choose.
      Runtime text is dark and editor text is light: the backdrop follows the theme that was
-     DRAWN and ignores the chrome's light/dark switch, or one of the two would be unreadable. */
-  #viewport[data-drawn="runtime"] { background: repeating-conic-gradient(#ffffff 0% 25%, #cccccc 0% 50%) 0 0 / 18px 18px; }
+     DRAWN and ignores the chrome's light/dark switch, or one of the two would be unreadable.
+     The runtime checkerboard is the core playground's own (white and #cccccc), so one meaning
+     has one look in both tools. */
+  #viewport[data-drawn="runtime"] {
+    background-color: #ffffff;
+    background-image:
+      linear-gradient(45deg, #cccccc 25%, transparent 25%, transparent 75%, #cccccc 75%),
+      linear-gradient(45deg, #cccccc 25%, transparent 25%, transparent 75%, #cccccc 75%);
+    background-size: 32px 32px;
+    background-position: 0 0, 16px 16px;
+  }
   #viewport[data-drawn="editor"]  { background: repeating-conic-gradient(#3c3c3c 0% 25%, #2e2e2e 0% 50%) 0 0 / 18px 18px; }
   #stage { position: absolute; top: 0; left: 0; transform-origin: top left; }
   #caption { font-size: 11px; color: var(--mute); text-align: right; margin-top: 7px;

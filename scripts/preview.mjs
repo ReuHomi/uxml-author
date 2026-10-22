@@ -295,6 +295,19 @@ const stateInput = { uxml, sheets, templates, states: job.states, activeStates: 
   }
 }
 
+// ── theme ───────────────────────────────────────────────────────────────────
+// A theme the core would not draw is drawn as its default, with a warning. That screen is not
+// the one the job asked about, so it is the same kind of refusal as a state that cannot apply.
+{
+  let th;
+  try { th = check.checkTheme(core, job.theme, w.document.createElement('div')); }
+  catch (e) { cannotRun('the requested theme could not be checked: ' + e.message); }
+  if (th.errors.length) {
+    cannotRun('the requested theme cannot be used, so this is not the screen asked about:\n  - ' +
+      th.errors.join('\n  - '));
+  }
+}
+
 // ── the gate ────────────────────────────────────────────────────────────────
 // `states` and `activeStates` travel as plain JSON on the input, so the page
 // inlines exactly what was checked here and converts it the same way.

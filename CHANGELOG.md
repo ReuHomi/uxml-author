@@ -42,9 +42,10 @@ compares previews with earlier ones.
   back and are still reported. A `TextField` has no caret or selection, a
   `ScrollView` has no scrollbar, a `RepeatButton` is bare text.
 - **The job takes `theme`**: `"runtime"` (the default) or `"editor"`. A name the
-  core does not know is reported (exit 1) and the runtime theme is drawn. The
-  first line of the report and the top of the preview name the theme that was
-  drawn, not the one asked for.
+  core does not draw stops the run with code 2 and no preview is written: the
+  core would draw its default and warn, and that screen is not the one asked
+  about. The first line of the report and the top of the preview name the theme
+  that was drawn.
 - **A `disabled` forced through `states` or `activeStates` is not dimmed.** Only
   `enabled="false"` written in the UXML dims. Rules for `:disabled` in your USS
   still apply.
@@ -53,8 +54,14 @@ compares previews with earlier ones.
 
 - The core bundle is rebuilt from uxml-preview 0.7.1 (303,507 bytes, 5,153
   lines; it was 246,989 bytes and 4,054 lines).
-- The checkerboard behind the preview follows the theme that was drawn (light
-  for runtime, dark for editor) and no longer follows the page's light/dark
+- A `states` key is judged by the core's own `subject.problem` (the probe
+  stylesheet and the skill's list of states are gone); a problem the skill does
+  not know is refused with the core's words. An unknown name in `activeStates`
+  and a key containing `{` are still refused here, because the core says nothing
+  about them. Refusals read as before, except that a mistyped state in a
+  `states` value no longer lists the valid names.
+- The checkerboard behind the preview follows the theme that was drawn (the
+  core playground's white and light grey for runtime, dark for editor) and no longer follows the page's light/dark
   switch, which left runtime text unreadable in dark mode.
 - The `version-dependent` channel is described as what it now is: values Unity
   measured differently on two versions. Using the theme's defaults no longer
