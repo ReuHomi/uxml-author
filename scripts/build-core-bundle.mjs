@@ -12,7 +12,7 @@
 // NOT MINIFIED, on purpose. Minifying saved 51 KB (177 vs 228 KB) and cost the
 // only review a committed build artifact can get: minified, the whole bundle is
 // 15 lines, so bumping the core produces one unreadable diff line. Unminified it
-// is ~3,700 lines with module boundaries marked, and an upgrade diff shows where
+// is ~5,200 lines with module boundaries marked, and an upgrade diff shows where
 // the change landed. The preview HTML grows by the same 51 KB, which is the
 // cheaper side of that trade.
 //
@@ -24,7 +24,7 @@
 // `npm ci` on plugin install, which would then pull esbuild's platform binaries
 // onto every user's machine for a script none of them run.
 //
-//   npm install --no-save esbuild uxml-preview@0.5.1
+//   npm install --no-save esbuild uxml-preview@0.7.1
 //
 import { build } from 'esbuild';
 import { writeFileSync, mkdtempSync, readFileSync } from 'node:fs';
