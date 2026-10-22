@@ -312,6 +312,34 @@ console.log('\nthe theme: the job asks, the core draws, and the report says whic
     `the page names the same theme as the report: ${pd.theme} / ${pe.theme} / ${pb.theme}`);
   expect(/^Pass/.test(pe.verdict) && /^Attention/.test(pb.verdict), 'and reaches the same verdict on each');
 
+  // The backdrop follows the theme that was drawn. Runtime text is dark and editor text is light,
+  // and the core paints nothing behind the panel, so a backdrop chosen by the page's own light/dark
+  // chrome would make one of the two unreadable (core handoff section 2: dark text on a dark page
+  // "almost cannot be seen").
+  expect(pd.backdrop === 'runtime' && pe.backdrop === 'editor' && pb.backdrop === 'runtime',
+    `the stage carries the drawn theme for its backdrop: ${pd.backdrop} / ${pe.backdrop} / ${pb.backdrop}`);
+  {
+    const html = readFileSync(TMP + '../out/theme-default.html', 'utf8');
+    const rule = (t) => new RegExp('#viewport\\[data-drawn="' + t + '"\\]\\s*\\{[^}]*repeating-conic-gradient').test(html);
+    expect(rule('runtime') && rule('editor'), 'and the page has a checkerboard rule for each theme');
+    const light = (html.match(/#viewport\[data-drawn="runtime"\]\s*\{[^}]*\}/) || [''])[0], dark = (html.match(/#viewport\[data-drawn="editor"\]\s*\{[^}]*\}/) || [''])[0];
+    expect(light !== '' && dark !== '' && !/var\(--/.test(light) && !/var\(--/.test(dark),
+      'neither rule uses the page chrome\'s variables, so the chrome\'s dark mode cannot move the backdrop');
+  }
+  mutate('src/page.html', 'viewport.setAttribute(\'data-drawn\', res.theme);', 'viewport.setAttribute(\'data-drawn\', String(UXML_INPUT.theme));', () => {
+    runJob(TMP + 'theme-bad.json');
+    expect(pageOf('theme-bad').backdrop === 'dark', 'mutation (the backdrop follows what was asked) → an unknown theme gets a "dark" backdrop');
+  });
+  mutate('src/page.html', 'viewport.setAttribute(\'data-drawn\', res.theme);', '', () => {
+    runJob(TMP + 'theme-editor.json');
+    expect(pageOf('theme-editor').backdrop === null, 'mutation (no attribute) → the stage has no theme to key its backdrop on');
+  });
+  mutate('src/page.html', '#viewport[data-drawn="runtime"]', '#viewport[data-drawn="runtime-off"]', () => {
+    runJob(TMP + 'theme-default.json');
+    expect(!/#viewport\[data-drawn="runtime"\]/.test(readFileSync(TMP + '../out/theme-default.html', 'utf8')), 'mutation (the runtime rule renamed away) → the page has no runtime checkerboard');
+  });
+  runJob(TMP + 'theme-default.json'); runJob(TMP + 'theme-editor.json'); runJob(TMP + 'theme-bad.json');   // the unmutated pages back
+
   // mutations
   mutate('scripts/preview.mjs', 'theme: job.theme', 'theme: undefined', () =>
     expect(!/^theme editor/.test(first(runJob(TMP + 'theme-editor.json'))), 'mutation (the job\'s theme never reaches the check) → an editor job reports runtime'));

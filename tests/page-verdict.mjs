@@ -33,6 +33,7 @@ const out = {
   colour: w.document.getElementById('dot').style.background,
   applied: (w.document.getElementById('applied') || { textContent: '' }).textContent,
   theme: (w.document.getElementById('drawn') || { textContent: '' }).textContent,
+  backdrop: (w.document.getElementById('viewport') || { getAttribute: () => null }).getAttribute('data-drawn'),
   channels,
 };
 await w.happyDOM.close();
