@@ -120,7 +120,8 @@
   // `subject: { kind: 'states-key', key, problem?, state? }` — and measures the key itself, in the
   // context it measured: no state in scope, so a key that needs one never selects anything. This file
   // used to keep a probe stylesheet and a copy of the state list to reach the same verdicts; the two
-  // were compared on every case the suites carry and the core agreed on all of them, so they are gone
+  // were compared on every case the suites carry (29 of 31 inputs agree; the other two are what
+  // the core is silent about, kept below), so the probe and the list are gone
   // (core CHANGELOG 0.6.0, "For consumers": "uxml-author master assumes the 0.5.1 meaning").
   //
   // What the core is silent about stays here, and is checked before it is asked:

@@ -127,6 +127,18 @@ section('the theme the document describes is the theme the scripts take');
     'mutations (code 1, a preview, the names dropped) → the claim check fails');
 }
 
+section('code 2 and the preview file: what the text says is what the script does');
+{
+  // A refusal writes no page, but a failure after the page is on disk leaves one — and says so.
+  const pSrc = readFileSync(ROOT + 'scripts/preview.mjs', 'utf8');
+  const says = (doc) => /fails\s+after\s+the\s+page\s+was\s+written,\s+the\s+message\s+says\s+so/.test(doc);
+  const does = (src) => /pageWritten\s*=\s*true/.test(src) && /A preview was written to \$\{outPath\} before this, but the run did not finish/.test(src);
+  expect(says(SKILL) && does(pSrc), 'SKILL.md says a failure after the page was written is reported, and preview.mjs reports it');
+  expect(!says(SKILL.replace(/fails\s+after\s+the\s+page\s+was\s+written/, 'fails')), 'mutation (the sentence loses its condition) → the claim check fails');
+  expect(!does(pSrc.replace('pageWritten = true;', '')), 'mutation (the script never records the write) → the claim check fails');
+  expect(!does(pSrc.replace('before this, but the run did not finish', 'as usual')), 'mutation (the message no longer says it) → the claim check fails');
+}
+
 section('the exit codes are what the table says');
 {
   expect(/\|\s*0\s*\|.*ran, clean/.test(SKILL), 'the table documents 0');

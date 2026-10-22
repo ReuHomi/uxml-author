@@ -140,9 +140,10 @@ the second matches nothing, even on a button with `enabled="false"`, and is
 refused.
 `activeStates` is a plain list of states every element is in at once, such as
 `["disabled"]`. Both are optional; leave them out and nothing changes. A state
-forced this way applies your `:state` rules to the element and nothing more: a
-forced `disabled` is not dimmed, and its parts and children are not marked
-disabled. Only `enabled="false"` written in the UXML dims, with its whole
+forced this way applies your `:state` rules to the element, and the core's own
+look for that state where it has one (a forced `checked` draws a `Toggle`'s check
+mark); a forced `disabled` is not dimmed, and its parts and children are not
+marked disabled. Only `enabled="false"` written in the UXML dims, with its whole
 subtree, so the dimmed look of a disabled control is not something `states` can
 show. The
 names are Unity's own pseudo-classes — `hover`, `active`, `inactive`, `focus`,
@@ -188,10 +189,11 @@ Code 2 usually means `happy-dom` is missing (`npm install happy-dom`) or the
 panel size is absent. It also means the job asked for something that cannot be
 applied — a state, a theme or a budget it got wrong — and the message names which. And
 it is what a crash looks like: an unexpected error is reported as code 2 with
-the error itself, never as 1, because the run decided nothing. No
-preview is written on code 2. If a `preview.html` is already at the output path,
-it is from an earlier run and nothing checked it against the current files; the
-message says so. Say that out loud, and do not show the old file as if it were
+the error itself, never as 1, because the run decided nothing. A refusal writes
+no preview. If the run fails after the page was written, the message says so and
+that file is not checked. If a `preview.html` is already at the output path and
+the message does not say it was just written, it is from an earlier run and
+nothing checked it against the current files; the message says so. Say that out loud, and do not show the old file as if it were
 this run's. A file presented as if it were checked, when it was not, is the
 failure this whole tool exists to prevent.
 
@@ -201,8 +203,8 @@ The channels mean different things and must not be flattened together.
 
 **Not drawn by this preview.** `MinMaxSlider`, `Foldout`, `DropdownField` and
 other controls the renderer has no drawing for fall back to a plain element,
-which means height 0 — they vanish from the preview, and everything below them
-slides up. Unity draws them normally. Valid properties the preview does not
+which means height 0 unless the screen gives them a size — they vanish from the
+preview, and everything below them slides up. Unity draws them normally. Valid properties the preview does not
 paint, such as `text-shadow` or `transition`, are listed here too. Nothing on
 the screen marks their absence, so this list is the only trace. Always pass it
 on.

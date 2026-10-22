@@ -862,6 +862,19 @@ section('N — what SKILL.md says the core draws, run against the core');
     [['"is not dimmed" removed', (t) => t.replace(/is\s+not\s+dimmed/g, 'is dimmed')], ['the file-only sentence removed', (t) => t.replace(SAY_FILE, '')],
      ['both halves removed', (t) => t.replace(/is\s+not\s+dimmed/g, 'is dimmed').replace(SAY_FILE, '')]]);
 
+  // A forced `checked` is not nothing: the core draws the check mark (core CHANGELOG 0.7.0, "a forced
+  // `:checked` reaches the input part and draws the check mark"), so "nothing more" would be wrong.
+  const off = paint('<ui:Toggle name="T" label="t" value="false" />');
+  const on = paint('<ui:Toggle name="T" label="t" value="false" />', { states: { '#T': ['checked'] } });
+  const marks = (p) => (p.el.innerHTML.match(/<svg|<path/g) || []).length;
+  const SAY_MARK = /forced\s+`checked`\s+draws\s+a\s+`Toggle`'s\s+check\s+mark/;
+  claim('a Toggle forced checked, with no USS of its own, gains a check mark an unforced one lacks',
+    { holds: marks(on) > marks(off), seen: `${marks(off)} -> ${marks(on)} drawn marks` },
+    SAY_MARK,
+    [['forced and unforced alike', () => marks(off) > marks(off)], ['nothing drawn at all', () => 0 > marks(off)], ['the unforced one has more', () => marks(off) > marks(on) + 1]],
+    [['the sentence says no mark', (t) => t.replace(/draws\s+a\s+`Toggle`'s/, 'draws no `Toggle`\'s')], ['the sentence removed', (t) => t.replace(/\(a\s+forced\s+`checked`[^)]*\)/, '')],
+     ['the state renamed', (t) => t.replace(/forced\s+`checked`/, 'forced `hover`')]]);
+
   // Scrollbars: the width is reserved, nothing is drawn.
   const scroll = paint('<ui:ScrollView name="S"><ui:Label text="x" /></ui:ScrollView>');
   const noBar = (names) => names.length > 0 && !names.some((n) => /scroller|slider|dragger|tracker/.test(n));
@@ -895,7 +908,7 @@ section('N — what SKILL.md says the core draws, run against the core');
      ['no part at all', () => noCaret([])]],
     [['the sentence says it draws them', (t) => t.replace(/does\s+not\s+draw\s+its\s+caret/, 'draws its caret')], ['the sentence removed', (t) => t.replace(/`TextField`\s+does\s+not\s+draw\s+its\s+caret\s+or\s+its\s+selection/g, '')],
      ['the control renamed', (t) => t.replace(/`TextField`(\s+does\s+not\s+draw)/, '`Slider`$1')]]);
-  [written, forced, everywhere, scroll, rb, tf].forEach((p) => p.r.dispose());
+  [written, forced, everywhere, off, on, scroll, rb, tf].forEach((p) => p.r.dispose());
 }
 
 section('H — no silent default panel size');
