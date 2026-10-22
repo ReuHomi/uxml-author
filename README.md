@@ -84,13 +84,18 @@ the design does.
 A preview that flattered its own output would be worse than none. This one is
 built to say what it did not draw.
 
-**Trustworthy.** The geometry of `VisualElement`, `Label`, `Button`, `Image` and
-`ScrollView`, at the panel size you give it.
+**Trustworthy.** The geometry of the fifteen controls the renderer draws —
+`VisualElement`, `Label`, `Button`, `Image`, `ScrollView`, `GroupBox`, `Box`,
+`TextField`, `Slider`, `SliderInt`, `Toggle`, `RadioButton`, `ProgressBar`,
+`TextElement` and `RepeatButton` — at the panel size you give it, on the theme
+you ask for (`runtime` for a game screen, `editor` for an editor window). A
+`TextField` has no caret or selection, a `ScrollView` has no scrollbar, and a
+`RepeatButton` is bare text, which is how Unity draws it.
 
-**Not yet drawn.** `Toggle`, `Slider`, `TextField`, `DropdownField` and other
-controls fall back to a plain element — which means they occupy nothing and
-disappear from the preview, while Unity draws them normally. Every one of them is
-reported, every time, because the screen gives you no other clue.
+**Not yet drawn.** `MinMaxSlider`, `Foldout`, `DropdownField` and other controls
+fall back to a plain element — which means they occupy nothing and disappear from
+the preview, while Unity draws them normally. Every one of them is reported,
+every time, because the screen gives you no other clue.
 
 **Never claimed.** Colour, borders and fonts are drawn but have not been checked
 against Unity. Text width comes from a browser font rather than Unity's font

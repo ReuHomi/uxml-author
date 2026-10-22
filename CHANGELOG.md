@@ -1,5 +1,76 @@
 # Changelog
 
+## 0.3.0 — 2026-10-22
+
+Moves to uxml-preview 0.7.1: Unity's runtime theme by default, fifteen drawn
+controls instead of five, and text the default font cannot draw no longer
+fails the run.
+
+### Behaviour changes
+
+Read these first if anything acts on the exit code of `scripts/preview.mjs`, or
+compares previews with earlier ones.
+
+- **The default theme is `runtime`.** A screen drawn without a theme now looks
+  like a game screen: 14px dark text, Label and Button with Unity's runtime
+  margins and padding, a Button with its runtime look, a scrolling `ScrollView`
+  reserving 24px for its scrollbar. Nothing is painted behind the panel, as in a
+  game, so runtime text is dark on whatever the preview shows behind it. Every
+  existing screen looks different with no change to its UXML or USS. Ask for
+  `"theme": "editor"` to draw the editor theme; it is not 0.2.1's drawing, because
+  the core's editor values are measured now.
+- **Hangul, Han and Kana text in the default font exits 3** (0 on 0.2.1, where
+  the core did not warn). Unity draws those characters with a fallback font and
+  the box can differ in size. With the 0.7.1 core and 0.2.1's rule the
+  new `font-fallback` reason would have exited 1 on a correct screen; it is now a
+  layout gap, or "not drawn" when the core says no box moves. The report gives
+  the core's words and one line on setting the font with
+  `-unity-font-definition`.
+- **A rich text tag in a `text` exits 3** (0 on 0.2.1, where the core did not
+  warn): the preview draws the tags as characters and Unity interprets them.
+- **`aspect-ratio`, `letter-spacing`, `word-spacing` and
+  `-unity-paragraph-spacing` no longer exit 3**: the core lays them out. A screen
+  that used one of them exited 3 on 0.2.1 and exits 0 now.
+  `-unity-text-auto-size` goes the other way: the core now says it moves boxes
+  in Unity (best-fit text), so a screen that used it exits 3 where 0.2.1 exited 0.
+- **Fifteen controls are drawn**, up from five: `GroupBox`, `Box`, `TextField`,
+  `Slider`, `SliderInt`, `Toggle`, `RadioButton`, `ProgressBar`, `TextElement`
+  and `RepeatButton` join `VisualElement`, `Label`, `Button`, `Image` and
+  `ScrollView`. They no longer fall back to a zero-size element or appear under
+  "not drawn", so a screen can report an overflow or a collapse that they used
+  to hide. `MinMaxSlider`, `Foldout`, `DropdownField` and the rest still fall
+  back and are still reported. A `TextField` has no caret or selection, a
+  `ScrollView` has no scrollbar, a `RepeatButton` is bare text.
+- **The job takes `theme`**: `"runtime"` (the default) or `"editor"`. A name the
+  core does not draw stops the run with code 2 and no preview is written: the
+  core would draw its default and warn, and that screen is not the one asked
+  about. The first line of the report and the top of the preview name the theme
+  that was drawn.
+- **A `disabled` forced through `states` or `activeStates` is not dimmed.** Only
+  `enabled="false"` written in the UXML dims. Rules for `:disabled` in your USS
+  still apply.
+
+### Other changes
+
+- The core bundle is rebuilt from uxml-preview 0.7.1 (303,507 bytes, 5,153
+  lines; it was 246,989 bytes and 4,054 lines).
+- A `states` key is judged by the core's own `subject.problem` (the probe
+  stylesheet and the skill's list of states are gone); a problem the skill does
+  not know is refused with the core's words. An unknown name in `activeStates`
+  and a key containing `{` are still refused here, because the core says nothing
+  about them. Refusals read as before, except that a mistyped state in a
+  `states` value no longer lists the valid names.
+- The checkerboard behind the preview follows the theme that was drawn (the
+  core playground's white and light grey for runtime, dark for editor) and no longer follows the page's light/dark
+  switch, which left runtime text unreadable in dark mode.
+- The `version-dependent` channel is described as what it now is: values Unity
+  measured differently on two versions. Using the theme's defaults no longer
+  raises it.
+- `SKILL.md` lists the fifteen drawn controls and what they leave out, drops
+  the sentences saying `TextField`, `Slider` and `Toggle` cannot be drawn,
+  explains the theme, and names the third cause of exit 3. The README's lists
+  follow.
+
 ## 0.2.1 — 2026-10-13
 
 Moves to uxml-preview 0.5.1, which says what each warning is about. The

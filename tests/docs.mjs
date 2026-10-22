@@ -3,7 +3,7 @@
 // nothing breaks, the model just starts following instructions that are no
 // longer true. These run the real thing and compare.
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, existsSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -89,6 +89,56 @@ section('the documented job examples actually run');
   }
 }
 
+section('the theme the document describes is the theme the scripts take');
+{
+  const pSrc = readFileSync(ROOT + 'scripts/preview.mjs', 'utf8');
+  const [preview = {}] = jsonBlocks();
+  // Both halves of one claim, so each can be broken on its own below.
+  const documented = (doc, src) =>
+    /"theme"/.test(doc) && src.includes('job.theme') &&
+    /game\s+screen[^.]*`runtime`/.test(doc) && /editor\s+window[^.]*`editor`/.test(doc) &&
+    /first\s+line\s+of\s+the\s+report[^.]*theme/.test(doc) && /nothing\s+is\s+painted\s+behind\s+the\s+panel/.test(doc);
+  expect(typeof preview.theme === 'string', 'the documented preview job carries a theme');
+  expect(documented(SKILL, pSrc), 'SKILL.md says when to use each theme, where the report names it, and what is behind the panel; preview.mjs reads job.theme');
+  expect(!documented(SKILL.replace(/game\s+screen[^.]*`runtime`/, ''), pSrc), 'mutation (no word on game screens) → the claim check fails');
+  expect(!documented(SKILL, pSrc.replace(/job\.theme/g, 'job.skin')), 'mutation (preview.mjs reads another key) → the claim check fails');
+  expect(!documented(SKILL.replace(/first\s+line\s+of\s+the\s+report/g, 'last line of the report'), pSrc), 'mutation (the wrong line named) → the claim check fails');
+  expect(!documented(SKILL.replace(/nothing\s+is\s+painted\s+behind\s+the\s+panel/g, 'a dark panel is painted'), pSrc), 'mutation (the backdrop described wrongly) → the claim check fails');
+
+  writeFileSync(T + 'ThemeScreen.uxml', `<ui:UXML xmlns:ui="UnityEngine.UIElements"><ui:Button name="B" text="Use" /></ui:UXML>`);
+  const themed = (theme) => {
+    writeFileSync(T + 'theme.json', JSON.stringify({ uxml: 'ThemeScreen.uxml', panel: { width: 200, height: 100 }, theme, out: 'theme.html' }));
+    try { return { code: 0, out: execFileSync('node', [ROOT + 'scripts/preview.mjs', T + 'theme.json'], { encoding: 'utf8', stdio: 'pipe' }) }; }
+    catch (e) { return { code: e.status, out: String(e.stdout || '') }; }
+  };
+  for (const name of ['runtime', 'editor']) {
+    const r = themed(name);
+    expect(r.code === 0 && r.out.split('\n')[0].startsWith('theme ' + name + '   '), `theme "${name}" runs clean and the report's first line names it: ${r.out.split('\n')[0]}`);
+  }
+  // An unknown name is a job that cannot be run as written (code 2, nothing written), like a state that
+  // matches nothing — not a finding about the document.
+  rmSync(T + 'theme.html', { force: true });
+  const unknown = themed('dark');
+  expect(unknown.code === 2 && !existsSync(T + 'theme.html'), 'an unknown name stops the run with code 2 and writes no preview, as SKILL.md says');
+  const SAYS_REFUSED = (t) => /A\s+name\s+other\s+than\s+`runtime`\s+or\s+`editor`[^.]*code\s+2[^.]*no\s+preview/.test(t);
+  expect(SAYS_REFUSED(SKILL), 'SKILL.md says that about an unknown name: code 2, no preview');
+  expect(!SAYS_REFUSED(SKILL.replace(/code\s+2/g, 'code 1')) && !SAYS_REFUSED(SKILL.replace(/no\s+preview/g, 'a preview')) &&
+    !SAYS_REFUSED(SKILL.replace(/other\s+than\s+`runtime`\s+or\s+`editor`/, 'the core does not know')),
+    'mutations (code 1, a preview, the names dropped) → the claim check fails');
+}
+
+section('code 2 and the preview file: what the text says is what the script does');
+{
+  // A refusal writes no page, but a failure after the page is on disk leaves one — and says so.
+  const pSrc = readFileSync(ROOT + 'scripts/preview.mjs', 'utf8');
+  const says = (doc) => /fails\s+after\s+the\s+page\s+was\s+written,\s+the\s+message\s+says\s+so/.test(doc);
+  const does = (src) => /pageWritten\s*=\s*true/.test(src) && /A preview was written to \$\{outPath\} before this, but the run did not finish/.test(src);
+  expect(says(SKILL) && does(pSrc), 'SKILL.md says a failure after the page was written is reported, and preview.mjs reports it');
+  expect(!says(SKILL.replace(/fails\s+after\s+the\s+page\s+was\s+written/, 'fails')), 'mutation (the sentence loses its condition) → the claim check fails');
+  expect(!does(pSrc.replace('pageWritten = true;', '')), 'mutation (the script never records the write) → the claim check fails');
+  expect(!does(pSrc.replace('before this, but the run did not finish', 'as usual')), 'mutation (the message no longer says it) → the claim check fails');
+}
+
 section('the exit codes are what the table says');
 {
   expect(/\|\s*0\s*\|.*ran, clean/.test(SKILL), 'the table documents 0');
@@ -152,6 +202,19 @@ section('the controls called unsupported are unsupported');
 
   supported.forEach((c) =>
     expect(new RegExp('`' + c + '`').test(SKILL), `${c} is supported and SKILL.md mentions it`));
+
+  // The sentence that tells the model to warn the person first must not name a control the
+  // preview now draws: "mostly Toggle, Slider" was true of 0.5.1 and is false of 0.7.1.
+  const said = SKILL.indexOf('Say so before you begin when a screen is mostly');
+  expect(said !== -1, 'SKILL.md still has the sentence about screens made mostly of controls the preview cannot draw');
+  const warnSentence = said === -1 ? '' : SKILL.slice(said, SKILL.indexOf('\n\n', said));
+  const warned = [...warnSentence.matchAll(/`([A-Z]\w+)`/g)].map((m) => m[1]);
+  expect(warned.length >= 2, 'it names some controls: ' + warned.join(', '));
+  const noneDrawn = (names, drawn) => names.length >= 2 && names.every((c) => !drawn.includes(c));
+  expect(noneDrawn(warned, supported), `none of them is drawn by the core: ${warned.join(', ')}`);
+  expect(!noneDrawn(warned, supported.concat(warned[0] || 'X')), 'mutation (the core starts drawing one of them) → the check fails');
+  expect(!noneDrawn(warned.concat('Toggle'), supported), 'mutation (the stale example Toggle is named) → the check fails');
+  expect(!noneDrawn(warned.slice(0, 1), supported), 'mutation (only one control named) → the check fails');
 
   const trustPara = SKILL.slice(SKILL.indexOf('- **Trust** the geometry'));
   const trusted = [...trustPara.slice(0, trustPara.indexOf('\n-')).matchAll(/`([A-Z]\w+)`/g)].map((m) => m[1]);

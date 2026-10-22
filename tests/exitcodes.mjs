@@ -289,6 +289,98 @@ console.log('\nstates come from the job, and a state that cannot be applied is n
   });
 }
 
+console.log('\nthe theme: the job asks, the core draws, and the report says which was drawn');
+{
+  const base = { uxml: 'Use.uxml', panel: { width: 400, height: 300 } };
+  const first = (r) => r.out.split('\n')[0];
+  const dflt = runJob(job('theme-default', base));
+  expect(dflt.code === 0 && /^theme runtime   panel 400x300/.test(first(dflt)), 'no theme in the job → the first line says runtime: ' + first(dflt));
+  const edit = runJob(job('theme-editor', { ...base, theme: 'editor' }));
+  expect(edit.code === 0 && /^theme editor   panel 400x300/.test(first(edit)), 'theme: "editor" → the first line says editor: ' + first(edit));
+  const run = runJob(job('theme-runtime', { ...base, theme: 'runtime' }));
+  expect(run.code === 0 && /^theme runtime   panel/.test(first(run)), 'theme: "runtime" asked outright is the default');
+  expect(dflt.out.split('\n')[1] === 'states: none applied (the default)', 'the states line is still the second line');
+
+  // A theme the core would not draw is a job that cannot be run as written, like a state that
+  // matches nothing: the screen drawn would not be the one asked about. Code 2, no page.
+  for (const [theme, what] of [['dark', 'an unknown name'], [null, 'null'], ['', 'an empty name'], [5, 'a number']]) {
+    const n = 'theme-bad-' + String(theme === null ? 'null' : theme === '' ? 'empty' : theme);
+    rmSync(TMP + '../out/' + n + '.html', { force: true });   // an earlier run of this suite may have left one
+    const r = runJob(job(n, { ...base, theme }));
+    expect(r.code === 2 && /the requested theme cannot be used/.test(r.out) && /No preview was written/.test(r.out) && !existsSync(TMP + '../out/' + n + '.html'),
+      `${what} as the theme → 2, named, and no preview written (got ${r.code})`);
+  }
+  expect(/"dark"/.test(runJob(job('theme-bad-dark', { ...base, theme: 'dark' })).out) &&
+    /would draw "runtime"/.test(runJob(job('theme-bad-dark', { ...base, theme: 'dark' })).out),
+    'and the message says which theme was asked and which the core would have drawn');
+  mkdirSync(TMP + '../out', { recursive: true });
+  writeFileSync(TMP + '../out/theme-stale.html', '<!-- from an earlier run -->');
+  const staleJob = TMP + 'theme-stale.json';
+  writeFileSync(staleJob, JSON.stringify({ ...base, theme: 'dark', out: '../out/theme-stale.html' }));
+  const stale = runJob(staleJob);
+  expect(stale.code === 2 && /The file already at .*theme-stale\.html is from an earlier run/.test(stale.out) &&
+    readFileSync(TMP + '../out/theme-stale.html', 'utf8') === '<!-- from an earlier run -->',
+    'with an old page at the output path, the refusal calls it an earlier run\'s and leaves it alone');
+
+  const pd = pageOf('theme-default'), pe = pageOf('theme-editor');
+  expect(pd.theme === 'theme runtime' && pe.theme === 'theme editor',
+    `the page names the same theme as the report: ${pd.theme} / ${pe.theme}`);
+  expect(/^Pass/.test(pd.verdict) && /^Pass/.test(pe.verdict), 'and reaches the same verdict on each');
+
+  // The backdrop follows the theme that was drawn. Runtime text is dark and editor text is light,
+  // and the core paints nothing behind the panel, so a backdrop chosen by the page's own light/dark
+  // chrome would make one of the two unreadable (core handoff section 2: dark text on a dark page
+  // "almost cannot be seen"). The runtime checkerboard is the core playground's own: white and
+  // #cccccc (playground/index.html, `#panel[data-theme="runtime"]`), so one meaning has one look.
+  expect(pd.backdrop === 'runtime' && pe.backdrop === 'editor', `the stage carries the drawn theme for its backdrop: ${pd.backdrop} / ${pe.backdrop}`);
+  {
+    const html = readFileSync(TMP + '../out/theme-default.html', 'utf8');
+    const rule = (t) => (html.match(new RegExp('#viewport\\[data-drawn="' + t + '"\\]\\s*\\{[^}]*\\}')) || [''])[0];
+    const light = rule('runtime'), dark = rule('editor');
+    expect(/#ffffff/i.test(light) && /#cccccc/i.test(light) && /gradient/.test(light), 'the runtime checkerboard is white and #cccccc, as in the core\'s playground');
+    expect(/gradient/.test(dark) && !/#ffffff|#cccccc/i.test(dark), 'the editor one is dark and has a checkerboard of its own');
+    expect(!/var\(--/.test(light) && !/var\(--/.test(dark),
+      'neither rule uses the page chrome\'s variables, so the chrome\'s dark mode cannot move the backdrop');
+  }
+  mutate('src/page.html', 'viewport.setAttribute(\'data-drawn\', res.theme);', 'viewport.setAttribute(\'data-drawn\', String(UXML_INPUT.theme));', () => {
+    runJob(TMP + 'theme-default.json');
+    expect(pageOf('theme-default').backdrop === 'undefined', 'mutation (the backdrop follows what was asked) → a job with no theme gets no backdrop of its own');
+  });
+  mutate('src/page.html', 'viewport.setAttribute(\'data-drawn\', res.theme);', '', () => {
+    runJob(TMP + 'theme-editor.json');
+    expect(pageOf('theme-editor').backdrop === null, 'mutation (no attribute) → the stage has no theme to key its backdrop on');
+  });
+  mutate('src/page.html', '#viewport[data-drawn="runtime"]', '#viewport[data-drawn="runtime-off"]', () => {
+    runJob(TMP + 'theme-default.json');
+    expect(rule0() === '', 'mutation (the runtime rule renamed away) → the page has no runtime checkerboard');
+    function rule0() { return (readFileSync(TMP + '../out/theme-default.html', 'utf8').match(/#viewport\[data-drawn="runtime"\]\s*\{[^}]*\}/) || [''])[0]; }
+  });
+  mutate('src/page.html', 'background-color: #ffffff', 'background-color: #f2f2f0', () => {
+    runJob(TMP + 'theme-default.json');
+    expect(!/#ffffff/i.test((readFileSync(TMP + '../out/theme-default.html', 'utf8').match(/#viewport\[data-drawn="runtime"\]\s*\{[^}]*\}/) || [''])[0]),
+      'mutation (another white) → the check against the playground\'s colours fails');
+  });
+  runJob(TMP + 'theme-default.json'); runJob(TMP + 'theme-editor.json');   // the unmutated pages back
+
+  // mutations
+  mutate('scripts/preview.mjs', 'theme: job.theme', 'theme: undefined', () =>
+    expect(!/^theme editor/.test(first(runJob(TMP + 'theme-editor.json'))), 'mutation (the job\'s theme never reaches the check) → an editor job reports runtime'));
+  mutate('scripts/preview.mjs', 'L(`${check.describeTheme(res)}   panel', 'L(`theme ${job.theme}   panel', () =>
+    expect(/^theme undefined/.test(first(runJob(TMP + 'theme-default.json'))), 'mutation (print what was asked) → a job with no theme is reported as "theme undefined"'));
+  mutate('src/page.html', 'globalThis.UxmlCheck.describeTheme(res)', "'theme ' + UXML_INPUT.theme", () => {
+    runJob(TMP + 'theme-default.json');
+    expect(pageOf('theme-default').theme === 'theme undefined', 'mutation (the page prints what was asked) → a job with no theme is shown as "theme undefined"');
+  });
+  runJob(TMP + 'theme-default.json');
+  mutate('scripts/preview.mjs', 'check.checkTheme(', 'check.checkThemeOff(', () => {
+    // the gate's own refusal still stops the run, but it is not the named one
+    const r = runJob(TMP + 'theme-bad-dark.json');
+    expect(!/the requested theme cannot be used/.test(r.out), 'mutation (the job-level refusal skipped) → the message is no longer the named one');
+  });
+  mutate('src/check.js', 'r.theme !== theme', "theme !== 'runtime'", () =>
+    expect(runJob(TMP + 'theme-editor.json').code === 2, 'mutation (a list of one theme kept in check.js) → an editor job is refused'));
+}
+
 console.log('\nG — the cap is never silent');
 {
   const p = job('cap', {
@@ -333,11 +425,11 @@ console.log('\nwhat the core says a warning is about decides the exit code');
   // and stay there across core upgrades: a valid style the preview does not
   // draw passes, one that moves boxes in Unity makes the preview incomplete,
   // and a misspelt property is the document's to fix.
-  const screen = (name, uss, body = '<ui:Label name="Title" text="Inventory" />') => {
+  const screen = (name, uss, body = '<ui:Label name="Title" text="Inventory" />', extra = {}) => {
     writeFileSync(TMP + `Styles/${name}.uss`, '#Panel { width: 300px; height: 200px; } ' + uss);
     writeFileSync(TMP + `${name}.uxml`, `<ui:UXML xmlns:ui="UnityEngine.UIElements"><Style src="Styles/${name}.uss" />
       <ui:VisualElement name="Panel">${body}</ui:VisualElement></ui:UXML>`);
-    return job('w-' + name, { uxml: `${name}.uxml`, panel: { width: 400, height: 300 } });
+    return job('w-' + name, { uxml: `${name}.uxml`, panel: { width: 400, height: 300 }, ...extra });
   };
   const shadow = runJob(screen('Shadow', '#Title { text-shadow: 1px 1px 0 black; }'));
   expect(shadow.code === 0, `a correct screen that uses text-shadow → 0 (got ${shadow.code})`);
@@ -345,17 +437,38 @@ console.log('\nwhat the core says a warning is about decides the exit code');
     'and text-shadow is listed as not drawn, not as a problem');
   expect(/^Pass/.test(pageOf('w-Shadow').verdict), 'the page passes it too');
 
-  const aspect = runJob(screen('Aspect', '#Title { aspect-ratio: 2; }'));
-  expect(aspect.code === 3, `a screen that uses aspect-ratio → 3 (got ${aspect.code})`);
-  expect(/not laid out by this preview \(1\)[\s\S]*aspect-ratio \(Unity 6000\.3\+\)/.test(aspect.out) &&
-    /from this preview's layout, not Unity's/.test(aspect.out), 'and the report says which property and that coordinates are the preview\'s');
-  const pa = pageOf('w-Aspect');
+  // aspect-ratio is laid out by the core since 0.6.0, so the layout-gap sample is -unity-text-auto-size
+  // (core tests/contract-060/text-and-fonts.test.ts, "D6": not-rendered with affectsLayout: true).
+  const AUTO = '#Title { -unity-text-auto-size: best-fit 8px 40px; }';
+  const auto = runJob(screen('AutoSize', AUTO));
+  expect(auto.code === 3, `a screen that uses -unity-text-auto-size → 3 (got ${auto.code})`);
+  expect(/not laid out by this preview \(1\)[\s\S]*-unity-text-auto-size \(Unity 6000\.3\+\)/.test(auto.out) &&
+    /from this preview's layout, not Unity's/.test(auto.out), 'and the report says which property and that coordinates are the preview\'s');
+  const pa = pageOf('w-AutoSize');
   expect(/^Incomplete preview/.test(pa.verdict) && /not laid out/.test(pa.verdict) && pa.channels['Not laid out by this preview'].count === 1,
     'the page calls it incomplete and lists it: ' + pa.verdict);
+  const aspect = runJob(screen('Aspect', '#Title { aspect-ratio: 2; }'));
+  expect(aspect.code === 0 && /not laid out/.test(aspect.out) === false,
+    `aspect-ratio is laid out now: a screen that uses it → 0, no layout gap (got ${aspect.code})`);
 
-  const both = runJob(screen('AspectCollapse', '#Title { aspect-ratio: 2; }', '<ui:Label name="Title" text="x" /><ui:Image name="Loose" />'));
+  const both = runJob(screen('AutoCollapse', AUTO, '<ui:Label name="Title" text="x" /><ui:Image name="Loose" />'));
   expect(both.code === 1 && /#Loose has no size and is invisible \(by this preview's layout/.test(both.out),
-    `aspect-ratio next to a collapsed image → 1, and the collapse says whose layout found it (got ${both.code})`);
+    `-unity-text-auto-size next to a collapsed image → 1, and the collapse says whose layout found it (got ${both.code})`);
+
+  // Text the default font cannot draw. The core's own words come first; the skill adds one line.
+  const HINT = /-unity-font-definition removes this warning; this preview cannot load font assets/;
+  const han = runJob(screen('Hangul', '', '<ui:Label name="Title" text="한글" />'));
+  expect(han.code === 3, `a Hangul Label in the default font → 3, not 1 (got ${han.code})`);
+  expect(/not laid out by this preview \(1\)[\s\S]*-unity-font-definition: The runtime default font \(NotInter-Regular\) has no glyphs for Hangul/.test(han.out) && HINT.test(han.out),
+    'and the report gives the core\'s words, then the one line about setting the font');
+  const ph = pageOf('w-Hangul');
+  expect(/^Incomplete preview/.test(ph.verdict) && ph.channels['Not laid out by this preview'].count === 1 && HINT.test(ph.channels['Not laid out by this preview'].items.join(' ')),
+    'the page agrees and carries the same line: ' + ph.verdict);
+  const hanEditor = runJob(screen('HangulEditor', '', '<ui:Label name="Title" text="한글" />', { theme: 'editor' }));
+  expect(hanEditor.code === 3 && /The editor default font \(Inter-Regular SDF\)/.test(hanEditor.out), 'the same on the editor theme, in that theme\'s words');
+  const rich = runJob(screen('RichText', '', '<ui:Label name="Title" text="&lt;b&gt;Inventory&lt;/b&gt;" />'));
+  expect(rich.code === 3 && /not laid out by this preview \(1\)[\s\S]*enable-rich-text/.test(rich.out), `a rich text tag → 3 (got ${rich.code})`);
+  expect(/^Incomplete preview/.test(pageOf('w-RichText').verdict), 'and the page agrees');
 
   const typo = runJob(screen('Colour', '#Title { colour: red; }'));
   expect(typo.code === 1 && /colour: not in the USS property reference/.test(typo.out), `a misspelt colour → 1 (got ${typo.code})`);
@@ -368,8 +481,17 @@ console.log('\nwhat the core says a warning is about decides the exit code');
   expect(root.code === 0 && /ignored here and in Unity \(1\)/.test(root.out), ':root → 0, listed as nothing to do');
 
   // mutations
-  mutate('src/check.js', "        return subj && subj.affectsLayout === true ? 'layoutGaps' : 'unsupported';", "        return 'unsupported';", () =>
-    expect(runJob(TMP + 'w-Aspect.json').code === 0, 'mutation (affectsLayout ignored) → aspect-ratio passes as 0, so the 3 case catches it'));
+  mutate('src/check.js', "        return subj && subj.affectsLayout === true ? 'layoutGaps' : 'unsupported';", "        return 'unsupported';", () => {
+    expect(runJob(TMP + 'w-AutoSize.json').code === 0, 'mutation (affectsLayout ignored) → -unity-text-auto-size passes as 0, so the 3 case catches it');
+    expect(runJob(TMP + 'w-RichText.json').code === 0, 'and a rich text tag passes as 0');
+  });
+  mutate('src/check.js', "      case 'font-fallback':\n        return subj && subj.affectsLayout === true ? 'layoutGaps' : 'unsupported';\n", '', () =>
+    expect(runJob(TMP + 'w-Hangul.json').code === 1, 'mutation (font-fallback unhandled) → a Hangul Label fails the run with 1, so the 3 case catches it'));
+  mutate('src/check.js', "      case 'font-fallback':\n        return subj && subj.affectsLayout === true ? 'layoutGaps' : 'unsupported';\n",
+    "      case 'font-fallback':\n        return 'unsupported';\n", () =>
+    expect(runJob(TMP + 'w-Hangul.json').code === 0, 'mutation (font-fallback always "not drawn") → a Hangul Label passes as 0'));
+  mutate('src/check.js', "    return w.reason === 'font-fallback'", '    return false', () =>
+    expect(!HINT.test(runJob(TMP + 'w-Hangul.json').out), 'mutation (the font hint switched off) → the report loses the line'));
   mutate('src/check.js', "      case 'not-uss':\n      case 'invalid-value':\n        return 'other';",
     "      case 'invalid-value':\n        return 'other';\n      case 'not-uss':\n        return 'unsupported';", () => {
     expect(runJob(TMP + 'w-Colour.json').code === 0, 'mutation (not-uss filed as not drawn) → the colour typo passes, so the 1 case catches it');

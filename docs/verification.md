@@ -12,10 +12,10 @@ way proves nothing.
 
 | Suite | Guards |
 | --- | --- |
-| `conditions` | painting, the collapse channel and what it must not swallow (hidden, emptied), injected images, multi-sheet resolution |
-| `exitcodes` | 0, 1, 2 and 3 stay distinguishable and rank 2 over 1 over 3, including a simulated missing `happy-dom`; 3 for an over-budget image and for a property the preview does not lay out; warnings sorted by the core's `reason` (a `text-shadow` screen 0, `aspect-ratio` 3, `colour` 1); assembled screens, a mistyped `element-name`, a missing template, a cyclic graph, slots, package paths |
+| `conditions` | painting, the collapse channel and what it must not swallow (hidden, emptied), injected images, multi-sheet resolution; the theme passed to the core and the theme reported; font-fallback and rich text as layout gaps; what SKILL.md says the core draws (section N), run against the core |
+| `exitcodes` | 0, 1, 2 and 3 stay distinguishable and rank 2 over 1 over 3, including a simulated missing `happy-dom`; 3 for an over-budget image and for a property the preview does not lay out; warnings sorted by the core's `reason` (a `text-shadow` screen 0, `-unity-text-auto-size` 3, `aspect-ratio` 0 because the core lays it out, a Hangul Label 3, `colour` 1); the job's theme, the report's first line and the page agreeing on the theme drawn, and the page's backdrop following it; assembled screens, a mistyped `element-name`, a missing template, a cyclic graph, slots, package paths |
 | `binding` | determinism, name retirement, renames, the untouched logic file, a repeated name refused before anything is written |
-| `docs` | SKILL.md still describes the code it ships with |
+| `docs` | SKILL.md still describes the code it ships with, including the controls it calls drawn or not drawn (read off the core, not kept as a list here) and the documented theme |
 
 Notable mutations, and what would slip past without them:
 
@@ -33,6 +33,17 @@ Notable mutations, and what would slip past without them:
   reason.
 - **skip the match check on a states key** — a selector that names no element
   is applied to nothing, and the run looks like a check of the state it named.
+  The verdict is the core's (`subject.problem`: `matches-nothing`,
+  `state-in-key`, `unknown-state`, or no problem for an unusable selector), read
+  by its fields and never by its wording. The mutations: the core's warnings not
+  read, `matches-nothing` not read, `state-in-key` not read (every key carrying a
+  state passes, with or without `activeStates` and on an `enabled="false"`
+  element — the four situations the skill's own probe used to guard), the core
+  not handed the states, any key the core names counted whether or not the job
+  gave it, and the message matched again. A `problem` this version does not know
+  is refused with the core's words. The skill keeps its own check for exactly
+  what the core is silent about: an unknown name in `activeStates`, and a key
+  with a `{` in it.
 - **count an over-budget image as a problem** — a screen with a large
   background can never exit 0 however correct it is. And the reverse, **let 3
   outrank 1** — a real defect hides behind "the preview may differ from Unity".
@@ -81,6 +92,41 @@ Notable mutations, and what would slip past without them:
   folder; spaces in the path are fine, so the trigger is the character set. The
   harness copies with readdir + copyFile for that reason.
 - **drop the retirement report** — a removed element reads as a clean run.
+- **leave the theme out of the core's options** — a job asking for the editor
+  theme gets the runtime screen, the report says runtime, and everything
+  agrees with itself. Caught only by comparing the editor and runtime Label
+  heights. Its siblings: skip the check that the core drew the theme asked (an
+  unknown name is then drawn as runtime and the run goes on), keep a list of one
+  theme in `check.js` (the editor theme is refused), and return no theme at all.
+  An unknown name is refused with code 2 because the core's warning for it has no
+  `subject`, so its fields cannot tell it from other `malformed` warnings; the
+  result can — `RenderResult.theme` is not the theme asked — and nothing here
+  lists theme names.
+- **let `font-fallback` reach the default branch** — a correct Korean screen
+  exits 1. Found by the core's own changelog, not by any screen in this
+  repository; no existing fixture had Hangul in it. Its siblings: ignore
+  `affectsLayout` (a Hangul Label exits 0, which is what the core says is
+  wrong), file every font-fallback as a layout gap (one that moves no box then
+  exits 3), and switch the hint off.
+- **sample a layout gap with a property the core has since started to lay
+  out** — `aspect-ratio` was the sample; from core 0.6.0 it raises nothing, so
+  the tests that used it failed late and for a reason that looked like a bug in
+  the gate. The sample is now `-unity-text-auto-size`, and `aspect-ratio` has a
+  test of its own saying it exits 0.
+- **claim in SKILL.md what the core does not do** — "a forced `disabled` is
+  not dimmed", "no scrollbar", "a `RepeatButton` is bare text", "a `TextField`
+  has no caret or selection". Each claim is checked in two halves: the core is
+  run, and the sentence is looked for. Each half is broken on its own — the core
+  half with doctored results (a dimmed forced disabled, a scroller part, a
+  styled RepeatButton, a caret part, and an empty part list that would pass on
+  nothing), the document half by flipping, removing or re-pointing the
+  sentence. The matching ignores where a line breaks.
+- **let the page's backdrop follow its own light/dark switch** — runtime text is
+  dark, the core paints nothing behind the panel, and a near-black checkerboard
+  makes the default theme unreadable. The stage carries the drawn theme for its
+  backdrop; mutations: follow the job's value (a job with no theme gets none), no
+  attribute, a rule missing, the runtime white changed (the runtime checkerboard
+  is the core playground's own: white and `#cccccc`).
 
 ## Human
 
@@ -98,8 +144,10 @@ did nothing because upscaling was capped at 1×.
    is why event wiring goes through a concrete wrapper rather than subscribing to
    a partial directly.
 3. A button press reaches the handler in the human-owned file.
-4. A `Toggle` that the preview cannot draw renders normally in Unity, which is
-   what the "not drawn by this preview" channel exists to tell you.
+4. A `Toggle`, when the preview could not yet draw one (uxml-author 0.2), renders
+   normally in Unity, which is what the "not drawn by this preview" channel exists
+   to tell you. The controls the channel names today (`MinMaxSlider`, `Foldout`,
+   `DropdownField`) were read off the core's output, not confirmed in Unity.
 
 ## Not verified
 
@@ -119,5 +167,13 @@ did nothing because upscaling was capped at 1×.
   that probe are what `preview.mjs` does, and a real screen was authored on
   Windows through the skill. Contributors should run the suites one at a time.
 
+- **How the preview page looks.** The runtime and editor checkerboards, the
+  header's theme line and dark-on-light text were not looked at by anyone in a
+  browser when they were written; the grey values are a choice, not a
+  measurement.
+- **That setting `-unity-font-definition` ends a Hangul warning in a project.**
+  Against the core, the font-fallback warning does go away and "font not loaded
+  by this preview" takes its place (exit stays 3). Whether a real Unity font
+  asset then lays the text out as the person expects was not tried.
 - **That SKILL.md makes an agent behave as intended.** The document is checked
   against the code, not against a model's behaviour.

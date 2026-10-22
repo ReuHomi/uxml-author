@@ -295,11 +295,28 @@ const stateInput = { uxml, sheets, templates, states: job.states, activeStates: 
   }
 }
 
+// ── theme ───────────────────────────────────────────────────────────────────
+// A theme the core would not draw is drawn as its default, with a warning. That screen is not
+// the one the job asked about, so it is the same kind of refusal as a state that cannot apply.
+{
+  let th;
+  try { th = check.checkTheme(core, job.theme, w.document.createElement('div')); }
+  catch (e) { cannotRun('the requested theme could not be checked: ' + e.message); }
+  if (th.errors.length) {
+    cannotRun('the requested theme cannot be used, so this is not the screen asked about:\n  - ' +
+      th.errors.join('\n  - '));
+  }
+}
+
 // ── the gate ────────────────────────────────────────────────────────────────
 // `states` and `activeStates` travel as plain JSON on the input, so the page
 // inlines exactly what was checked here and converts it the same way.
+// `theme` is passed on as written, absent or not: an unknown name is the core's to refuse,
+// with a warning that says what it drew instead. The report's first line says which theme
+// that was, so nothing here guesses.
 const input = { uxml, sheets, templates, assets, panel: job.panel,
-                states: stateInput.states, activeStates: stateInput.activeStates };
+                states: stateInput.states, activeStates: stateInput.activeStates,
+                theme: job.theme };
 let res;
 try { res = check.run(core, w.document.createElement('div'), input); }
 catch (e) { cannotRun('the render threw: ' + e.message); }
@@ -313,11 +330,11 @@ res.dispose();
 
 // ── report ──────────────────────────────────────────────────────────────────
 const L = (s) => console.log(s);
-L(`panel ${job.panel.width}x${job.panel.height}   sheets ${Object.keys(sheets).length}   templates ${Object.keys(templates).length}   assets embedded ${Object.keys(assets).length}`);
+L(`${check.describeTheme(res)}   panel ${job.panel.width}x${job.panel.height}   sheets ${Object.keys(sheets).length}   templates ${Object.keys(templates).length}   assets embedded ${Object.keys(assets).length}`);
 L(check.describeStates(res.applied));
 
 L(`\nnot drawn by this preview (${res.unsupported.length}) — valid USS/UXML that Unity applies; not a fault, keep it; this list is the only trace`);
-res.unsupported.forEach((x) => L('  - ' + x.message));
+res.unsupported.forEach((x) => L('  - ' + check.describeNotDrawn(x)));
 
 // Not drawn, and Unity would have moved boxes for it. The run cannot vouch
 // that sizes and positions here are Unity's, which is what code 3 says.
@@ -366,7 +383,7 @@ if (res.matchesUnity.length) {
 }
 
 if (res.versionDependent.length) {
-  L(`\nmeasured on Unity 6000.0.40f1 (${res.versionDependent.length}) — a standing condition, not a problem`);
+  L(`\nmeasured on Unity 6000.0.40f1 (${res.versionDependent.length}) — values Unity measured differently on two versions; not a problem`);
   res.versionDependent.forEach((x) => L('  - ' + x.message));
 }
 

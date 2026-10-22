@@ -55,7 +55,9 @@
   header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
   h1 { font-size: 17px; margin: 0 0 3px; font-weight: 600; letter-spacing: -.015em; }
   .sub { color: var(--mute); margin: 0 0 24px; font-size: 12.5px; }
-  #applied { margin-top: -18px; color: var(--slate); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  #drawn, #applied { color: var(--slate); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  #drawn { margin-top: -18px; margin-bottom: 2px; }
+  #applied { margin-top: 0; }
   .label {
     font-size: 10.5px; font-weight: 600; letter-spacing: .08em;
     text-transform: uppercase; color: var(--mute); margin: 0 0 12px;
@@ -85,6 +87,20 @@
     border: 1px solid var(--rule); border-radius: 3px;
     background: repeating-conic-gradient(var(--check2) 0% 25%, var(--check) 0% 50%) 0 0 / 18px 18px;
   }
+  /* The core paints nothing behind the panel, so what shows through is the page's to choose.
+     Runtime text is dark and editor text is light: the backdrop follows the theme that was
+     DRAWN and ignores the chrome's light/dark switch, or one of the two would be unreadable.
+     The runtime checkerboard is the core playground's own (white and #cccccc), so one meaning
+     has one look in both tools. */
+  #viewport[data-drawn="runtime"] {
+    background-color: #ffffff;
+    background-image:
+      linear-gradient(45deg, #cccccc 25%, transparent 25%, transparent 75%, #cccccc 75%),
+      linear-gradient(45deg, #cccccc 25%, transparent 25%, transparent 75%, #cccccc 75%);
+    background-size: 32px 32px;
+    background-position: 0 0, 16px 16px;
+  }
+  #viewport[data-drawn="editor"]  { background: repeating-conic-gradient(#3c3c3c 0% 25%, #2e2e2e 0% 50%) 0 0 / 18px 18px; }
   #stage { position: absolute; top: 0; left: 0; transform-origin: top left; }
   #caption { font-size: 11px; color: var(--mute); text-align: right; margin-top: 7px;
              font-variant-numeric: tabular-nums; }
@@ -124,6 +140,7 @@
   <div>
     <h1 id="h1">UXML preview</h1>
     <p class="sub">Everything needed to judge this is in this one file. It loads nothing from anywhere.</p>
+    <p class="sub" id="drawn"></p>
     <p class="sub" id="applied"></p>
   </div>
   <button id="theme" type="button" aria-pressed="false">Dark</button>
@@ -207,8 +224,10 @@
     stage.style.height = panel.height + 'px';
 
     var res = globalThis.UxmlCheck.run(core, stage, UXML_INPUT);
+    viewport.setAttribute('data-drawn', res.theme);
 
     if (UXML_INPUT.title) document.getElementById('h1').textContent = UXML_INPUT.title;
+    document.getElementById('drawn').textContent = globalThis.UxmlCheck.describeTheme(res);
     document.getElementById('applied').textContent = globalThis.UxmlCheck.describeStates(res.applied);
     document.getElementById('src-uxml').textContent = UXML_INPUT.uxml;
     document.getElementById('src-uss').textContent = Object.keys(UXML_INPUT.sheets)
@@ -288,7 +307,7 @@
       'Valid USS or UXML that Unity applies and this preview does not \u2014 a control drawn as a plain ' +
       'element, a property not painted. Not a fault: keep it. Nothing on screen marks the absence, ' +
       'which makes this list the only trace.',
-      res.unsupported, function (x) { return esc(x.message); });
+      res.unsupported, function (x) { return esc(globalThis.UxmlCheck.describeNotDrawn(x)); });
 
     channel('budget', 'Not laid out by this preview',
       'Valid USS that changes size or position in Unity, left out of this layout. Sizes and positions ' +
@@ -350,8 +369,8 @@
       });
 
     channel('flat', 'Measured on Unity 6000.0.40f1',
-      'Raised whenever a control relies on theme defaults, so it is a standing condition rather ' +
-      'than an event. It stays out of the verdict.',
+      'Values Unity measured differently on two versions, such as a Button with no text on the ' +
+      'editor theme; this preview draws one of them. It stays out of the verdict.',
       res.versionDependent, function (x) { return esc(x.message); });
 
     channel('flat', 'Ignored here and in Unity',
