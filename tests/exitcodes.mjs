@@ -433,8 +433,8 @@ console.log('\nwhat the core says a warning is about decides the exit code');
   mutate('src/check.js', "      case 'font-fallback':\n        return subj && subj.affectsLayout === true ? 'layoutGaps' : 'unsupported';\n",
     "      case 'font-fallback':\n        return 'unsupported';\n", () =>
     expect(runJob(TMP + 'w-Hangul.json').code === 0, 'mutation (font-fallback always "not drawn") → a Hangul Label passes as 0'));
-  mutate('src/check.js', 'function fontHint(', 'function fontHintOff(', () =>
-    expect(!HINT.test(runJob(TMP + 'w-Hangul.json').out), 'mutation (the font hint renamed away) → the report loses the line'));
+  mutate('src/check.js', "    return w.reason === 'font-fallback'", '    return false', () =>
+    expect(!HINT.test(runJob(TMP + 'w-Hangul.json').out), 'mutation (the font hint switched off) → the report loses the line'));
   mutate('src/check.js', "      case 'not-uss':\n      case 'invalid-value':\n        return 'other';",
     "      case 'invalid-value':\n        return 'other';\n      case 'not-uss':\n        return 'unsupported';", () => {
     expect(runJob(TMP + 'w-Colour.json').code === 0, 'mutation (not-uss filed as not drawn) → the colour typo passes, so the 1 case catches it');

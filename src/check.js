@@ -330,13 +330,18 @@
       },
       activeStates: cascadeOpts.activeStates,
       states: cascadeOpts.states,
+      // Passed through untouched, `undefined` included: the core has a default and
+      // judges any value it does not know (a warning, then the default is drawn).
+      // Tidying the value here would hide that warning from the report.
+      theme: input.theme,
     });
     var resolved = core.resolveStyles(doc, cascadeOpts);
 
-    // `version-dependent` is a standing condition, not an event: it fires
-    // whenever a themed control is used at all. Counting it as a problem makes
-    // the failure signal permanent, and a signal that is always on carries
-    // nothing. It gets its own channel and never reaches the exit code.
+    // `version-dependent` marks a value Unity measured differently on two versions
+    // (since uxml-preview 0.7.0: an editor-theme Button with no text, spacing without a
+    // generator, a title of only spaces) — the preview draws one of them. The author
+    // cannot act on it, so counting it as a problem would fail a correct screen. It gets
+    // its own channel and never reaches the exit code.
     //
     // Two of the template diagnostics belong in channels that already exist,
     // and putting them in `other` would have been wrong in opposite directions:
@@ -517,13 +522,15 @@
       depsMissing: depsMissing,
       ambiguousDeps: ambiguous,
       applied: st.applied,
+      // What the core drew, not what was asked for: an unknown name is drawn as the default.
+      theme: r.theme,
       rootId: doc.root.id,
       boxes: boxes,
       panel: panel,
     };
   }
 
-  // Every `subject.kind` uxml-preview 0.5.1 documents. Both `reason` and
+  // Every `subject.kind` uxml-preview 0.7.1 documents (api.md, "subject"). Both `reason` and
   // `subject.kind` are open sets — the core may add values in a minor release —
   // so anything outside these lists is not guessed at: it goes to `other`,
   // where it is printed and fails the run, rather than vanishing into a channel
@@ -540,6 +547,9 @@
    *   not-uss, invalid-value  -> other          the author's; exit 1
    *   not-rendered            -> unsupported    valid, not drawn here; no exit
    *                           -> layoutGaps     ...and it moves boxes in Unity; exit 3
+   *   font-fallback           -> layoutGaps     drawn, but Unity uses a fallback font and
+   *                                             the box can differ; exit 3
+   *                           -> unsupported    ...when the core says it moves no box
    *   matches-unity           -> matchesUnity   nothing to do; no exit
    *                              (a repeated name keeps its own channel)
    *   version-dependent       -> versionDependent
@@ -556,6 +566,8 @@
       case 'invalid-value':
         return 'other';
       case 'not-rendered':
+        return subj && subj.affectsLayout === true ? 'layoutGaps' : 'unsupported';
+      case 'font-fallback':
         return subj && subj.affectsLayout === true ? 'layoutGaps' : 'unsupported';
       case 'matches-unity':
         return subj && subj.kind === 'name' ? 'repeatedNames' : 'matchesUnity';
@@ -580,10 +592,30 @@
     return s;
   }
 
+  // The core says the default font lacks the glyphs; the way out is the author's, and the
+  // core's text does not know this preview's limit, so the skill adds one line. The core's
+  // own words always come first. Setting the font moves the warning rather than ending the
+  // exit 3: a Unity font asset cannot be loaded here, and the core says so in its place.
+  function fontHint(w) {
+    return w.reason === 'font-fallback'
+      ? ' \u2014 Setting the Unity font with -unity-font-definition removes this warning; this preview cannot load font assets, so it reports that instead.'
+      : '';
+  }
+
   /** How a layout gap reads: the property, and the Unity version that has it. */
   function describeGap(w) {
     var subj = w.subject || {};
-    return (subj.property || w.kind) + (subj.since ? ' (Unity ' + subj.since + '+)' : '') + ': ' + w.message;
+    return (subj.property || w.kind) + (subj.since ? ' (Unity ' + subj.since + '+)' : '') + ': ' + w.message + fontHint(w);
+  }
+
+  /** How an entry in "not drawn by this preview" reads: the core's words, and the hint if there is one. */
+  function describeNotDrawn(w) {
+    return w.message + fontHint(w);
+  }
+
+  /** The theme that was drawn, in one wording for the report and the page. */
+  function describeTheme(res) {
+    return 'theme ' + res.theme;
   }
 
   /**
@@ -639,6 +671,7 @@
 
   globalThis.UxmlCheck = {
     run: run, judge: judge, classify: classify, describeDefect: describeDefect, describeGap: describeGap,
+    describeNotDrawn: describeNotDrawn, describeTheme: describeTheme,
     resolveSheetUrl: resolveSheetUrl,
     checkStates: checkStates, describeStates: describeStates,
   };

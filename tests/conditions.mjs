@@ -751,11 +751,11 @@ section('L — warnings are sorted by what the core says they are about');
     'mutation (not-rendered unhandled) → rich text fails the run');
   expect(code(M("code: problems.length ? 1 : (overBudget.length || layoutGaps.length) ? 3 : 0", "code: problems.length ? 1 : overBudget.length ? 3 : 0"), RICH) === 0,
     'mutation (layout gaps not in the verdict) → rich text passes as 0');
-  const hintGone = tryM("function fontHint(", "function fontHintOff(");
+  const hintGone = tryM("    return w.reason === 'font-fallback'", "    return false");
   const gapOf = (C) => C && C.describeGap({ kind: 'unsupported-property', reason: 'font-fallback', message: 'core words',
     subject: { kind: 'property', property: '-unity-font-definition', affectsLayout: true } });
   expect(hintGone === null || !/removes this warning/.test(String(gapOf(hintGone))),
-    'mutation (the font hint renamed away) → the hint disappears from the gap line');
+    'mutation (the font hint switched off) → the hint disappears from the gap line');
   const NoBasis = M("var basis = (res.layoutGaps || []).length ?", "var basis = false ?");
   const rb = NoBasis.run(core, stage(), { uxml: '<ui:UXML xmlns:ui="UnityEngine.UIElements"><Style src="W.uss" /><ui:Label name="P" text="hi" /><ui:Image name="Z" /></ui:UXML>',
     sheets: { 'W.uss': '#P { width: 100px; height: 40px; -unity-text-auto-size: best-fit 8px 40px; }' }, panel: PANEL });
