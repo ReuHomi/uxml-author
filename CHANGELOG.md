@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0 —
+## 0.3.0 — 2026-10-22
 
 Moves to uxml-preview 0.7.1: Unity's runtime theme by default, fifteen drawn
 controls instead of five, and text the default font cannot draw no longer
