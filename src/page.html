@@ -87,6 +87,11 @@
     border: 1px solid var(--rule); border-radius: 3px;
     background: repeating-conic-gradient(var(--check2) 0% 25%, var(--check) 0% 50%) 0 0 / 18px 18px;
   }
+  /* The core paints nothing behind the panel, so what shows through is the page's to choose.
+     Runtime text is dark and editor text is light: the backdrop follows the theme that was
+     DRAWN and ignores the chrome's light/dark switch, or one of the two would be unreadable. */
+  #viewport[data-drawn="runtime"] { background: repeating-conic-gradient(#ffffff 0% 25%, #cccccc 0% 50%) 0 0 / 18px 18px; }
+  #viewport[data-drawn="editor"]  { background: repeating-conic-gradient(#3c3c3c 0% 25%, #2e2e2e 0% 50%) 0 0 / 18px 18px; }
   #stage { position: absolute; top: 0; left: 0; transform-origin: top left; }
   #caption { font-size: 11px; color: var(--mute); text-align: right; margin-top: 7px;
              font-variant-numeric: tabular-nums; }
@@ -210,6 +215,7 @@
     stage.style.height = panel.height + 'px';
 
     var res = globalThis.UxmlCheck.run(core, stage, UXML_INPUT);
+    viewport.setAttribute('data-drawn', res.theme);
 
     if (UXML_INPUT.title) document.getElementById('h1').textContent = UXML_INPUT.title;
     document.getElementById('drawn').textContent = globalThis.UxmlCheck.describeTheme(res);
