@@ -75,6 +75,7 @@ node scripts/preview.mjs job.json
   "uxml": "Inventory.uxml",
   "title": "Inventory",
   "panel": { "width": 1920, "height": 1080 },
+  "theme": "runtime",
   "assets": { "Art/potion.png": "Art/potion.png" },
   "out": "preview.html"
 }
@@ -106,6 +107,19 @@ node scripts/bind-csharp.mjs bind.json
 ```
 `renames` is only for a rename the person actually asked for.
 
+**Which theme.** Controls without a style of your own are drawn with one of
+Unity's two default themes. For a game screen use `runtime`, the theme a new
+PanelSettings asset gives a UIDocument; for an editor window or an inspector
+tool use `editor`. Leave `theme` out and `runtime` is drawn. A name the core
+does not know is reported (exit 1) and the runtime theme is drawn anyway, so a
+mistyped theme is never mistaken for a checked one. The first line of the
+report and the top of the preview name the theme that was actually drawn; say
+it when you show the result.
+
+Runtime text is dark and nothing is painted behind the panel, as in a game:
+the checkerboard behind the preview is that emptiness, not a background in the
+UXML. Do not add a background to the screen to make the text readable on it.
+
 **Checking a screen in a particular state.** Rules under `:hover`, `:active`,
 `:focus`, `:checked`, `:disabled` and the like never apply in a plain run. To
 judge the screen as it looks in one of those states, name it in the job:
@@ -125,7 +139,12 @@ must not itself contain a state: `"#UseButton"`, not `"#UseButton:disabled"` —
 the second matches nothing, even on a button with `enabled="false"`, and is
 refused.
 `activeStates` is a plain list of states every element is in at once, such as
-`["disabled"]`. Both are optional; leave them out and nothing changes. The
+`["disabled"]`. Both are optional; leave them out and nothing changes. A state
+forced this way applies your `:state` rules to the element and nothing more: a
+forced `disabled` is not dimmed, and its parts and children are not marked
+disabled. Only `enabled="false"` written in the UXML dims, with its whole
+subtree, so the dimmed look of a disabled control is not something `states` can
+show. The
 names are Unity's own pseudo-classes — `hover`, `active`, `inactive`, `focus`,
 `disabled`, `enabled`, `checked` — and the list is always an array, even for
 one state. The report's second line and the top of the preview name the
@@ -138,7 +157,7 @@ otherwise produce a screen that looks checked and is not the one asked about.
 Fix the job and run again.
 
 Never open `src/core.bundle.js`. It is a generated build artifact of about
-241 KB (4,054 lines) — not minified, but every identifier is mangled — and
+296 KB (5,153 lines) — not minified, but every identifier is mangled — and
 reading it will cost you the conversation for nothing.
 
 ## Exit codes
@@ -148,19 +167,21 @@ reading it will cost you the conversation for nothing.
 | 0 | ran, clean | carry on |
 | 1 | ran, found something | fix it, or tell the person plainly if you cannot |
 | 2 | **did not run** | nothing checked this output; say so before showing anything |
-| 3 | ran, clean, but the preview may differ from Unity | an image was over the embed budget, or a property that moves boxes in Unity was not laid out; say which parts to check in Unity, and do not edit the document for it |
+| 3 | ran, clean, but the preview may differ from Unity | an image was over the embed budget, or a property that moves boxes in Unity was not laid out, or text the default font cannot draw; say which parts to check in Unity, and do not edit the document for it |
 
 The codes run 0–3. When several apply, 2 wins over 1, 1 over 3, and 3 over 0:
 a defect alongside an over-budget image is a 1, because the defect is what
 needs a fix.
 
-Code 3 is never about the UXML or USS. It has two causes, and the report names
+Code 3 is never about the UXML or USS. It has three causes, and the report names
 each one: an image over the embed budget (raise `assetBudget`, or tell the
-person it is drawn as not yet present), and a valid property that changes size
-or position in Unity but that this preview does not lay out, such as
-`aspect-ratio` (the coordinates around it are this preview's, not Unity's). Do
-not edit the screen to make code 3 go away. Never describe a code-3 result as
-matching Unity; tell the person which parts to check in Unity.
+person it is drawn as not yet present); a valid property that changes size or
+position in Unity but that this preview does not lay out, such as
+`-unity-text-auto-size` or a rich text tag in a `text` (the coordinates around
+it are this preview's, not Unity's); and Hangul, Han or Kana text in the default
+font, which Unity draws with a fallback font a few pixels taller. Do not edit the
+screen to make code 3 go away. Never describe a code-3 result as matching Unity;
+tell the person which parts to check in Unity.
 
 Code 2 usually means `happy-dom` is missing (`npm install happy-dom`) or the
 panel size is absent. It also means the job asked for something that cannot be
@@ -177,18 +198,23 @@ failure this whole tool exists to prevent.
 
 The channels mean different things and must not be flattened together.
 
-**Not drawn by this preview.** `Toggle`, `Slider`, `TextField` and other
-controls the renderer has no drawing for fall back to a plain element, which
-means height 0 — they vanish from the preview, and everything below them slides
-up. Unity draws them normally. Valid properties the preview does not paint,
-such as `text-shadow` or `transition`, are listed here too. Nothing on the
-screen marks their absence, so this list is the only trace. Always pass it on.
+**Not drawn by this preview.** `MinMaxSlider`, `Foldout`, `DropdownField` and
+other controls the renderer has no drawing for fall back to a plain element,
+which means height 0 — they vanish from the preview, and everything below them
+slides up. Unity draws them normally. Valid properties the preview does not
+paint, such as `text-shadow` or `transition`, are listed here too. Nothing on
+the screen marks their absence, so this list is the only trace. Always pass it
+on.
 
-**Not laid out by this preview.** Valid USS that changes size or position in
-Unity — `aspect-ratio`, or `letter-spacing`, which is drawn but left out of
-text measurement — and that this preview does not lay out. The run exits 3,
-and any zero-size or overflow finding is marked as coming from this preview's
-layout.
+**Not laid out by this preview.** Valid USS or UXML that changes size or
+position in Unity and that this preview does not lay out — `-unity-text-auto-size`,
+or a rich text tag in a `text`, which is drawn as plain characters — and Hangul,
+Han or Kana text in the default font, which this preview lays out in the
+default font while Unity draws it with a fallback font. The run exits 3, and any
+zero-size or overflow finding is marked as coming from this preview's layout.
+For the fallback font the report adds one line: a Unity font set with
+`-unity-font-definition` removes that warning, but this preview cannot load a
+font asset, so it will say so instead and the run stays at 3.
 
 **Ignored here and in Unity.** Not a defect; Unity ignores these too.
 
@@ -253,9 +279,10 @@ is not the state the person meant, the rules hiding its children are where to
 look. An element with an explicit `width: 0` or `height: 0`, or with even one
 visible child, stays in *Collapsed*.
 
-`Measured on Unity 6000.0.40f1` is a standing condition, not an event. It fires
-whenever a control uses theme defaults. Do not treat it as a problem and do not
-lead with it.
+`Measured on Unity 6000.0.40f1` lists values Unity measured differently on two
+versions, such as a `Button` with no text on the editor theme. The preview draws
+one of them. It is not a problem and never changes the exit code; do not lead
+with it. A control that merely uses the theme's defaults raises nothing.
 
 ## Screens assembled from more than one file
 
@@ -323,8 +350,14 @@ making it appear.
 
 It is honest about layout and quiet about the rest.
 
-- **Trust** the geometry of `VisualElement`, `Label`, `Button`, `Image` and
-  `ScrollView`, at the panel size given.
+- **Trust** the geometry of `VisualElement`, `Label`, `Button`, `Image`,
+  `ScrollView`, `GroupBox`, `Box`, `TextField`, `Slider`, `SliderInt`, `Toggle`,
+  `RadioButton`, `ProgressBar`, `TextElement` and `RepeatButton` (these are the
+  controls the renderer draws), at the panel size given and on the theme drawn.
+- **Know what they leave out.** A `TextField` does not draw its caret or its
+  selection. A `ScrollView` reserves the width of its scrollbar and does not draw
+  it. A `RepeatButton` is bare text, as it is in Unity; it does not look like a
+  button.
 - **Do not trust** colour, borders and fonts as a match for Unity — they are
   drawn, but never verified against it.
 - **Text width** comes from a browser font, not from Unity's font asset. This is
@@ -332,7 +365,7 @@ It is honest about layout and quiet about the rest.
 - **Do not read sizes off the screen.** The view scales to fit and prints the
   factor; the source is where dimensions come from.
 
-Say so before you begin when a screen is mostly `Toggle`, `Slider`,
+Say so before you begin when a screen is mostly `MinMaxSlider`, `Foldout`,
 `DropdownField` and the like: the preview will be close to empty and worth
 little for that screen. Warning afterwards, with a blank preview already on the
 table, is worse than not offering.
