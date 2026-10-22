@@ -179,7 +179,7 @@ person it is drawn as not yet present); a valid property that changes size or
 position in Unity but that this preview does not lay out, such as
 `-unity-text-auto-size` or a rich text tag in a `text` (the coordinates around
 it are this preview's, not Unity's); and Hangul, Han or Kana text in the default
-font, which Unity draws with a fallback font a few pixels taller. Do not edit the
+font, which Unity draws with a fallback font, so the box can differ in size. Do not edit the
 screen to make code 3 go away. Never describe a code-3 result as matching Unity;
 tell the person which parts to check in Unity.
 

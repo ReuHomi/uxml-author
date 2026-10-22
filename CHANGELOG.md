@@ -21,7 +21,7 @@ compares previews with earlier ones.
   the core's editor values are measured now.
 - **Hangul, Han and Kana text in the default font exits 3** (0 on 0.2.1, where
   the core did not warn). Unity draws those characters with a fallback font and
-  the box can be a few pixels taller. With the 0.7.1 core and 0.2.1's rule the
+  the box can differ in size. With the 0.7.1 core and 0.2.1's rule the
   new `font-fallback` reason would have exited 1 on a correct screen; it is now a
   layout gap, or "not drawn" when the core says no box moves. The report gives
   the core's words and one line on setting the font with
