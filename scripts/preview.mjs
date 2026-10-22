@@ -370,7 +370,7 @@ if (res.matchesUnity.length) {
 }
 
 if (res.versionDependent.length) {
-  L(`\nmeasured on Unity 6000.0.40f1 (${res.versionDependent.length}) — a standing condition, not a problem`);
+  L(`\nmeasured on Unity 6000.0.40f1 (${res.versionDependent.length}) — values Unity measured differently on two versions; not a problem`);
   res.versionDependent.forEach((x) => L('  - ' + x.message));
 }
 

@@ -360,8 +360,8 @@
       });
 
     channel('flat', 'Measured on Unity 6000.0.40f1',
-      'Raised whenever a control relies on theme defaults, so it is a standing condition rather ' +
-      'than an event. It stays out of the verdict.',
+      'Values Unity measured differently on two versions, such as a Button with no text on the ' +
+      'editor theme; this preview draws one of them. It stays out of the verdict.',
       res.versionDependent, function (x) { return esc(x.message); });
 
     channel('flat', 'Ignored here and in Unity',
